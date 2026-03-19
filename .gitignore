@@ -1,2 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Data
 data/
-*.csv
+.csv
+
+# Local test scripts
+tests/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
