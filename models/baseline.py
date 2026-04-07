@@ -612,7 +612,6 @@ class TemporalFusionTransformer(nn.Module):
         Optional:
             diagnostics dictionary
         """
-        batch_size = all_inputs.size(0)
 
         # --------------------------------------------------------------
         # Step 1: input embeddings

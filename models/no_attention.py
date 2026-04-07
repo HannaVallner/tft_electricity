@@ -94,9 +94,10 @@ class VariableSelectionNetwork(nn.Module):
             return combined, sparse_weights.squeeze(-1)
 
 
-class TemporalFusionTransformerNoAttention(nn.Module):
+class TemporalFusionTransformer(nn.Module):
     """
-    TFT ablation model without the transformer self-attention block.
+    TFT ablation removing the temporal self-attention module while preserving
+    all other architectural components (VSN, LSTM, static enrichment, gating).
 
     Keeps:
     - embeddings

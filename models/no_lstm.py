@@ -106,7 +106,7 @@ class VariableSelectionNetwork(nn.Module):
             return combined, sparse_weights.squeeze(-1)
 
 
-class TemporalFusionTransformerNoLSTM(nn.Module):
+class TemporalFusionTransformer(nn.Module):
     """
     TFT-style model with the LSTM block removed.
 
@@ -262,25 +262,6 @@ class TemporalFusionTransformerNoLSTM(nn.Module):
         )
 
         self.static_context_enrichment = GatedResidualNetwork(
-            input_dim=self.hidden_dim,
-            hidden_dim=self.hidden_dim,
-            output_dim=self.hidden_dim,
-            context_dim=None,
-            dropout_rate=self.dropout_rate,
-            time_distributed=False,
-        )
-
-        # Kept for closeness to baseline architecture, though not used for recurrence now.
-        self.static_context_state_h = GatedResidualNetwork(
-            input_dim=self.hidden_dim,
-            hidden_dim=self.hidden_dim,
-            output_dim=self.hidden_dim,
-            context_dim=None,
-            dropout_rate=self.dropout_rate,
-            time_distributed=False,
-        )
-
-        self.static_context_state_c = GatedResidualNetwork(
             input_dim=self.hidden_dim,
             hidden_dim=self.hidden_dim,
             output_dim=self.hidden_dim,
@@ -449,10 +430,6 @@ class TemporalFusionTransformerNoLSTM(nn.Module):
         static_context_variable_selection = self.static_context_variable_selection(static_encoder)
         static_context_enrichment = self.static_context_enrichment(static_encoder)
 
-        # Kept for closeness with baseline, though unused downstream for recurrence.
-        _ = self.static_context_state_h(static_encoder)
-        _ = self.static_context_state_c(static_encoder)
-
         expanded_static_context_hist = static_context_variable_selection.unsqueeze(1).expand(
             -1, encoder_steps, -1
         )
@@ -470,13 +447,11 @@ class TemporalFusionTransformerNoLSTM(nn.Module):
             context=expanded_static_context_future,
         )  # (B, dec, H)
 
-        # No LSTM here: just combine selected temporal features directly.
-        sequence_layer = torch.cat([historical_features, future_features], dim=1)  # (B, total, H)
-        input_embeddings = torch.cat([historical_features, future_features], dim=1)
+        selected_sequence = torch.cat([historical_features, future_features], dim=1)
 
         temporal_feature_layer, _ = self.post_sequence_gate_add_norm(
-            sequence_layer,
-            input_embeddings,
+            selected_sequence,
+            selected_sequence,
         )
 
         expanded_static_context_enrichment = static_context_enrichment.unsqueeze(1).expand(
@@ -541,7 +516,3 @@ def quantile_loss(y_true, y_pred, quantiles=(0.1, 0.5, 0.9)):
         losses.append(loss_q)
 
     return torch.mean(torch.cat(losses, dim=-1))
-
-
-# Optional alias so the rest of the code can keep importing TemporalFusionTransformer
-TemporalFusionTransformer = TemporalFusionTransformerNoLSTM
