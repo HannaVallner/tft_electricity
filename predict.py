@@ -13,11 +13,11 @@ from dataset import TFTDataset
 
 
 MODEL_REGISTRY = {
-    "tft_baseline": "models.tft_baseline",
-    "mlp_features": "models.mlp_features",
-    "no_attention": "models.no_attention",
-    "no_lstm": "models.no_lstm",
-    "transformer_only": "models.transformer_only",
+    "baseline": "models.tft_baseline",
+    "mlp_features": "models.tft_mlp_features",
+    "no_attention": "models.tft_no_attention",
+    "no_lstm": "models.tft_no_lstm",
+    "transformer_only": "models.tft_transformer_only",
 }
 
 
