@@ -9,36 +9,54 @@ from torch.utils.data import DataLoader
 
 from data_formatter import ElectricityFormatter
 from dataset import TFTDataset
-
-
-MODEL_REGISTRY = {
-    "baseline": "models.tft_baseline",
-    "no_lstm": "models.tft_no_lstm",
-    "no_attention": "models.tft_no_attention",
-    "mlp_features": "models.tft_mlp_features",
-    "transformer_only": "models.tft_transformer_only",
-}
+from registry import MODEL_REGISTRY
 
 
 def load_model_class_and_loss(model_name):
+    """
+    Load model class and loss function dynamically from the registry.
+    """
     if model_name not in MODEL_REGISTRY:
         raise ValueError(
             f"Unknown model '{model_name}'. "
-            f"Choose from: {list(MODEL_REGISTRY.keys())}"
+            f"Available models: {list(MODEL_REGISTRY.keys())}"
         )
 
-    module = importlib.import_module(MODEL_REGISTRY[model_name])
+    model_info = MODEL_REGISTRY[model_name]
+    module = importlib.import_module(model_info["module"])
+    model_class = getattr(module, model_info["class_name"])
+    loss_fn = getattr(module, model_info["loss_name"])
 
-    if not hasattr(module, "TemporalFusionTransformer"):
-        raise ValueError(f"{MODEL_REGISTRY[model_name]} is missing TemporalFusionTransformer")
+    return model_class, loss_fn
 
-    if not hasattr(module, "quantile_loss"):
-        raise ValueError(f"{MODEL_REGISTRY[model_name]} is missing quantile_loss")
 
-    return module.TemporalFusionTransformer, module.quantile_loss
+def select_subset_of_ids(df, num_ids, random_state=42):
+    """
+    Keep only a subset of unique IDs.
+    Useful for quick experiments/debugging.
+    """
+    unique_ids = df["id"].drop_duplicates()
+
+    if num_ids is None:
+        return df.copy()
+
+    if num_ids > len(unique_ids):
+        raise ValueError(
+            f"Requested {num_ids} ids, but only {len(unique_ids)} are available."
+        )
+
+    selected_ids = unique_ids.sample(n=num_ids, random_state=random_state)
+
+    subset = df[df["id"].isin(selected_ids)].copy()
+    subset = subset.sort_values(["id", "hours_from_start"]).reset_index(drop=True)
+
+    return subset
 
 
 def evaluate(model, dataloader, loss_fn, device):
+    """
+    Evaluate model on validation data and return average loss.
+    """
     model.eval()
     total_loss = 0.0
     num_batches = 0
@@ -61,9 +79,13 @@ def evaluate(model, dataloader, loss_fn, device):
 
 
 def train_one_epoch(model, dataloader, optimizer, loss_fn, device, epoch_index, print_every):
+    """
+    Train model for one epoch and return average training loss.
+    """
     model.train()
     total_loss = 0.0
     num_batches = 0
+
     start_time = time.time()
 
     for batch_idx, batch in enumerate(dataloader, start=1):
@@ -71,8 +93,10 @@ def train_one_epoch(model, dataloader, optimizer, loss_fn, device, epoch_index, 
         targets = batch["outputs"].to(device)
 
         optimizer.zero_grad()
+
         predictions = model(inputs)
         loss = loss_fn(targets, predictions)
+
         loss.backward()
         optimizer.step()
 
@@ -95,20 +119,6 @@ def train_one_epoch(model, dataloader, optimizer, loss_fn, device, epoch_index, 
     return total_loss / num_batches
 
 
-def select_subset_of_ids(df, num_ids, random_state=42):
-    unique_ids = df["id"].drop_duplicates()
-
-    if num_ids > len(unique_ids):
-        raise ValueError(
-            f"Requested {num_ids} ids, but only {len(unique_ids)} are available."
-        )
-
-    selected_ids = unique_ids.sample(n=num_ids, random_state=random_state)
-    subset = df[df["id"].isin(selected_ids)].copy()
-    subset = subset.sort_values(["id", "hours_from_start"]).reset_index(drop=True)
-    return subset
-
-
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -118,7 +128,7 @@ def main(args):
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    model_save_path = save_dir / f"{args.model}_best.pt"
+    checkpoint_path = save_dir / f"{args.model}_best.pt"
 
     print("Loading processed electricity data...")
     df = pd.read_csv(data_path)
@@ -132,20 +142,20 @@ def main(args):
     print("Full valid dataframe shape:", valid_df.shape)
     print("Full test dataframe shape:", test_df.shape)
 
-    if args.num_train_ids is not None:
-        print(f"Selecting subset of train IDs: {args.num_train_ids}")
-        train_df = select_subset_of_ids(train_df, args.num_train_ids, random_state=42)
+    train_df = select_subset_of_ids(train_df, args.num_train_ids, random_state=42)
+    valid_df = select_subset_of_ids(valid_df, args.num_valid_ids, random_state=42)
 
-    if args.num_valid_ids is not None:
-        print(f"Selecting subset of valid IDs: {args.num_valid_ids}")
-        valid_df = select_subset_of_ids(valid_df, args.num_valid_ids, random_state=42)
-
-    print("Train dataframe shape:", train_df.shape)
-    print("Valid dataframe shape:", valid_df.shape)
+    print("Train dataframe shape after ID subset:", train_df.shape)
+    print("Valid dataframe shape after ID subset:", valid_df.shape)
+    print("Train unique IDs:", train_df["id"].nunique())
+    print("Valid unique IDs:", valid_df["id"].nunique())
 
     print("Building datasets...")
     train_dataset = TFTDataset(train_df, formatter)
     valid_dataset = TFTDataset(valid_df, formatter)
+
+    train_dataset.summary()
+    valid_dataset.summary()
 
     print("Creating dataloaders...")
     train_loader = DataLoader(
@@ -153,6 +163,7 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=True,
     )
+
     valid_loader = DataLoader(
         valid_dataset,
         batch_size=args.batch_size,
@@ -161,6 +172,7 @@ def main(args):
 
     print(f"Using device: {device}")
     model = model_class(formatter).to(device)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     best_valid_loss = float("inf")
@@ -197,25 +209,68 @@ def main(args):
 
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
-            torch.save(model.state_dict(), model_save_path)
-            print(f"New best model saved to: {model_save_path}")
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"New best model saved to: {checkpoint_path}")
 
     print("Training finished.")
     print(f"Best validation loss: {best_valid_loss:.6f}")
+    print(f"Best checkpoint saved at: {checkpoint_path}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--model", type=str, required=True, choices=list(MODEL_REGISTRY.keys()))
-    parser.add_argument("--data_path", type=str, default="data/electricity_processed.csv")
-    parser.add_argument("--save_dir", type=str, default="checkpoints")
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--learning_rate", type=float, default=1e-3)
-    parser.add_argument("--num_epochs", type=int, default=2)
-    parser.add_argument("--print_every", type=int, default=20)
-    parser.add_argument("--num_train_ids", type=int, default=None)
-    parser.add_argument("--num_valid_ids", type=int, default=None)
+    parser.add_argument(
+        "--model",
+        type=str,
+        required=True,
+        choices=list(MODEL_REGISTRY.keys()),
+        help="Which model architecture to train.",
+    )
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default="data/electricity_processed.csv",
+        help="Path to processed electricity csv.",
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="checkpoints",
+        help="Directory where model checkpoints are saved.",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=32,
+    )
+    parser.add_argument(
+        "--learning_rate",
+        type=float,
+        default=1e-3,
+    )
+    parser.add_argument(
+        "--num_epochs",
+        type=int,
+        default=2,
+    )
+    parser.add_argument(
+        "--print_every",
+        type=int,
+        default=20,
+    )
+    parser.add_argument(
+        "--num_train_ids",
+        type=int,
+        default=None,
+        help="Optional subset of train IDs for quick experiments.",
+    )
+    parser.add_argument(
+        "--num_valid_ids",
+        type=int,
+        default=None,
+        help="Optional subset of validation IDs for quick experiments.",
+    )
 
     args = parser.parse_args()
     main(args)

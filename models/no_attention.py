@@ -2,12 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from layers import (
+from src.layers import (
     TimeDistributed,
     GateAddNorm,
     GatedResidualNetwork,
 )
-from data_formatter import DataTypes, InputTypes
+from src.data_formatter import DataTypes, InputTypes
 
 
 class VariableSelectionNetwork(nn.Module):

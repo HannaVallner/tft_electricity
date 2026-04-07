@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from layers import TimeDistributed, GateAddNorm, GatedResidualNetwork
-from data_formatter import DataTypes, InputTypes
+from src.layers import TimeDistributed, GateAddNorm, GatedResidualNetwork
+from src.data_formatter import DataTypes, InputTypes
 
 
 class SimpleMLP(nn.Module):
