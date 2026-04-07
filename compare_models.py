@@ -6,7 +6,7 @@ import pandas as pd
 
 
 DEFAULT_MODELS = [
-    "tft_baseline",
+    "baseline",
     "mlp_features",
     "no_attention",
     "no_lstm",
