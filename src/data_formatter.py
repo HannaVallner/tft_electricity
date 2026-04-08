@@ -69,7 +69,6 @@ class ElectricityFormatter:
         ("power_usage", DataTypes.REAL_VALUED, InputTypes.TARGET),
         ("hour", DataTypes.REAL_VALUED, InputTypes.KNOWN_INPUT),
         ("day_of_week", DataTypes.REAL_VALUED, InputTypes.KNOWN_INPUT),
-        ("month", DataTypes.REAL_VALUED, InputTypes.KNOWN_INPUT),
         ("hours_from_start", DataTypes.REAL_VALUED, InputTypes.KNOWN_INPUT),
         ("categorical_id", DataTypes.CATEGORICAL, InputTypes.STATIC_INPUT),
     ]
@@ -147,7 +146,7 @@ class ElectricityFormatter:
 
         model_params = {
             'dropout_rate': 0.1,
-            'hidden_layer_size': 40,
+            'hidden_layer_size': 160,
             'learning_rate': 0.001,
             'minibatch_size': 64,
             'max_gradient_norm': 0.01,
@@ -310,7 +309,7 @@ class ElectricityFormatter:
             target_scaler = self._target_scaler[identifier]
 
             for col in sliced_copy.columns:
-                if col not in {"id", "forecast_time"}:
+                if col not in {"id", "forecast_time", "forecast_origin", "target_time", "horizon"}:
                     # Turn into a 2D shape
                     sliced_copy[col] = target_scaler.inverse_transform(
                         sliced_copy[[col]]
