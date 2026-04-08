@@ -2,24 +2,39 @@
 __pycache__/
 *.pyc
 
-# Data
-data/*
-!data/.gitkeep
-
-# Local test scripts
-tests/
-
 # VSCode
 .vscode/
 
-# Outputs
+# Data (keep only structure)
+data/*
+!data/.gitkeep
+
+# Tests (keep folder, ignore contents)
+tests/*
+!tests/.gitkeep
+
+# Outputs (ignore everything by default)
 outputs/*
+
+# Keep root placeholder
 !outputs/.gitkeep
+
+# Checkpoints
 !outputs/checkpoints/
+outputs/checkpoints/*
 !outputs/checkpoints/.gitkeep
+
+# Metrics
 !outputs/metrics/
+outputs/metrics/*
 !outputs/metrics/.gitkeep
+
+# Plots
 !outputs/plots/
+outputs/plots/*
 !outputs/plots/.gitkeep
+
+# Predictions
 !outputs/predictions/
+outputs/predictions/*
 !outputs/predictions/.gitkeep

@@ -36,7 +36,7 @@ The models predict 24-hour ahead electricity consumption using a 168-hour histor
 ## Project Structure
 ```
 tft_electricity/
-├── data/ *
+├── data/
 ├── models/
 │   ├── baseline.py
 │   ├── mlp_features.py
@@ -64,10 +64,7 @@ tft_electricity/
 ├── README.md
 ├── requirements.txt
 ```
-\* Generated after running the following:
-```
-python create_dataset.py
-```
+
 ---
 
 ## Setup
