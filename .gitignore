@@ -2,11 +2,6 @@
 __pycache__/
 *.pyc
 
-# Virtual environments
-.venv/
-venv/
-env/
-
 # Data
 data/
 .csv
@@ -14,12 +9,6 @@ data/
 # Local test scripts
 tests/
 
-# OS
-.DS_Store
-Thumbs.db
 
 # VSCode
 .vscode/
-
-checkpoints/
-predictions/
