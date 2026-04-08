@@ -11,7 +11,7 @@ from dataset import TFTDataset
 from registry import MODEL_REGISTRY
 
 
-def load_model_class_and_loss(model_name):
+def load_model_class(model_name):
     """
     Load model class dynamically from registry.
     """
@@ -60,7 +60,7 @@ def main(args):
         shuffle=False,
     )
 
-    model_class = load_model_class_and_loss(args.model)
+    model_class = load_model_class(args.model)
 
     print(f"Using device: {device}")
     model = model_class(formatter).to(device)
@@ -71,6 +71,8 @@ def main(args):
 
     all_rows = []
     sample_index = 0
+    encoder_steps = formatter.get_fixed_params()["num_encoder_steps"]
+
 
     print("Running predictions...")
 
@@ -87,7 +89,9 @@ def main(args):
                 raw_sample = test_dataset.samples[sample_index]
 
                 sample_id = raw_sample["identifier"][0, 0]
-                sample_times = raw_sample["time"][formatter.get_fixed_params()["num_encoder_steps"]:, 0]
+                full_times = raw_sample["time"][:, 0]
+                forecast_origin = full_times[encoder_steps - 1]
+                target_times = full_times[encoder_steps:]
 
                 p10 = predictions[b, :, 0]
                 p50 = predictions[b, :, 1]
@@ -98,6 +102,9 @@ def main(args):
                         {
                             "id": sample_id,
                             "forecast_time": sample_times[step],
+                            "forecast_origin": forecast_origin,
+                            "target_time": target_times[step],
+                            "horizon": step + 1,
                             "p10": p10[step],
                             "p50": p50[step],
                             "p90": p90[step],
@@ -146,7 +153,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=32,
+        default=64,
     )
 
     args = parser.parse_args()
