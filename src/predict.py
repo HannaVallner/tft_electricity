@@ -101,7 +101,6 @@ def main(args):
                     all_rows.append(
                         {
                             "id": sample_id,
-                            "forecast_time": sample_times[step],
                             "forecast_origin": forecast_origin,
                             "target_time": target_times[step],
                             "horizon": step + 1,
