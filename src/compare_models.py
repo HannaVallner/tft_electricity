@@ -34,19 +34,25 @@ def save_latex_table(comparison_df, output_path):
 
     latex_df = latex_df[columns_to_include]
 
+    best_idx = latex_df["test_nql_mean"].idxmin()
+
+    # Convert values to strings before inserting LaTeX formatting
+    for col in latex_df.columns:
+        if pd.api.types.is_numeric_dtype(latex_df[col]):
+            latex_df[col] = latex_df[col].map(lambda x: f"{x:.6f}")
+        else:
+            latex_df[col] = latex_df[col].astype(str)
+
+    for col in latex_df.columns:
+        latex_df.loc[best_idx, col] = f"\\textbf{{{latex_df.loc[best_idx, col]}}}"
+
     latex_table = latex_df.to_latex(
         index=False,
-        float_format="%.6f",
         caption="Comparison of TFT model variants on the electricity forecasting task.",
         label="tab:model_comparison",
         bold_rows=False,
         escape=False,
     )
-
-    best_idx = latex_df["test_nql_mean"].idxmin()
-
-    for col in latex_df.columns:
-        latex_df.loc[best_idx, col] = f"\\textbf{{{latex_df.loc[best_idx, col]}}}"
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(latex_table)
