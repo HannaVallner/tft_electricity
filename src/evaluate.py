@@ -79,7 +79,6 @@ def build_targets_dataframe(test_dataset, formatter):
             rows.append(
                 {
                     "id": sample_id,
-                    "forecast_time": target_times[step - 1],
                     "forecast_origin": forecast_origin,
                     "target_time": target_times[step - 1],
                     "horizon": step,
@@ -304,7 +303,7 @@ def main(args):
     predictions_df = pd.read_csv(predictions_path)
     targets_df = build_targets_dataframe(test_dataset, formatter)
 
-    merge_keys = ["id", "forecast_time", "forecast_origin", "target_time", "horizon"]
+    merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
     merged_df = predictions_df.merge(targets_df, on=merge_keys, how="inner")
 
     if merged_df.empty:
