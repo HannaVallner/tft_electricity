@@ -253,6 +253,7 @@ class ElectricityFormatter:
         # Extract relevant columns
         column_definition = self.get_column_definition()
         id_column = get_single_col_by_input_type(InputTypes.ID, column_definition)
+        time_column = get_single_col_by_input_type(InputTypes.TIME, column_definition)
 
         real_inputs = extract_cols_from_data_type(
             DataTypes.REAL_VALUED,
@@ -276,6 +277,8 @@ class ElectricityFormatter:
                 continue
 
             sliced_copy = sliced.copy()
+            sliced_copy[f"{time_column}_raw"] = sliced_copy[time_column]
+
             sliced_copy[real_inputs] = self._real_scalers[identifier].transform(
                 sliced_copy[real_inputs].values
             )
@@ -309,7 +312,7 @@ class ElectricityFormatter:
             target_scaler = self._target_scaler[identifier]
 
             for col in sliced_copy.columns:
-                if col not in {"id", "forecast_time", "forecast_origin", "target_time", "horizon"}:
+                if col not in {"id", "forecast_origin", "target_time", "horizon"}:
                     # Turn into a 2D shape
                     sliced_copy[col] = target_scaler.inverse_transform(
                         sliced_copy[[col]]

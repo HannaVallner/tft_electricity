@@ -40,6 +40,9 @@ class TFTDataset(Dataset):
         self.time_col = self._get_single_col_by_type("TIME")
         self.target_col = self._get_single_col_by_type("TARGET")
 
+        # Use preserved raw time column if available; otherwise fall back
+        self.raw_time_col = f"{self.time_col}_raw" if f"{self.time_col}_raw" in self.df.columns else self.time_col
+
         # use every formatter-defined column except ID and TIME as model inputs
         self.input_cols = [
             name
@@ -82,7 +85,7 @@ class TFTDataset(Dataset):
         3. store:
             - inputs: full input window
             - outputs: decoder part of target only
-            - time: full time window
+            - time: full ORIGINAL time window if available
             - identifier: full id window
             - active_entries: ones like in the original code
         """
@@ -101,8 +104,8 @@ class TFTDataset(Dataset):
             input_array = sliced[self.input_cols].to_numpy(dtype=np.float32)
             target_array = sliced[[self.target_col]].to_numpy(dtype=np.float32)
 
-            # Keep time and identifier as arrays too
-            time_array = sliced[[self.time_col]].to_numpy()
+            # Keep ORIGINAL time and identifier as arrays too
+            time_array = sliced[[self.raw_time_col]].to_numpy()
             identifier_array = sliced[[self.id_col]].to_numpy()
 
             # Create overlapping windows
@@ -165,3 +168,4 @@ class TFTDataset(Dataset):
         print(f"  active_entries:      {first_sample['active_entries'].shape}")
         print(f"  time shape:          {first_sample['time'].shape}")
         print(f"  identifier shape:    {first_sample['identifier'].shape}")
+        print(f"  raw time column:     {self.raw_time_col}")
