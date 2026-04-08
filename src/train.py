@@ -1,6 +1,7 @@
 from pathlib import Path
 import argparse
 import importlib
+import json
 import time
 
 import pandas as pd
@@ -24,11 +25,16 @@ def load_model_class_and_loss(model_name):
 
     model_info = MODEL_REGISTRY[model_name]
     module = importlib.import_module(model_info["module"])
+
+    if not hasattr(module, model_info["class_name"]):
+        raise ValueError(f"{model_info['module']} is missing {model_info['class_name']}")
+    if not hasattr(module, model_info["loss_name"]):
+        raise ValueError(f"{model_info['module']} is missing {model_info['loss_name']}")
+
     model_class = getattr(module, model_info["class_name"])
     loss_fn = getattr(module, model_info["loss_name"])
 
     return model_class, loss_fn
-
 
 def select_subset_of_ids(df, num_ids, random_state=42):
     """
@@ -78,14 +84,13 @@ def evaluate(model, dataloader, loss_fn, device):
     return total_loss / num_batches
 
 
-def train_one_epoch(model, dataloader, optimizer, loss_fn, device, epoch_index, print_every):
+def train_one_epoch(model, dataloader, optimizer, loss_fn, device, epoch_index, print_every, max_gradient_norm=None):
     """
     Train model for one epoch and return average training loss.
     """
     model.train()
     total_loss = 0.0
     num_batches = 0
-
     start_time = time.time()
 
     for batch_idx, batch in enumerate(dataloader, start=1):
@@ -93,11 +98,13 @@ def train_one_epoch(model, dataloader, optimizer, loss_fn, device, epoch_index, 
         targets = batch["outputs"].to(device)
 
         optimizer.zero_grad()
-
         predictions = model(inputs)
         loss = loss_fn(targets, predictions)
-
         loss.backward()
+
+        if max_gradient_norm is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_gradient_norm)
+
         optimizer.step()
 
         total_loss += loss.item()
@@ -122,63 +129,69 @@ def train_one_epoch(model, dataloader, optimizer, loss_fn, device, epoch_index, 
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    formatter = ElectricityFormatter()
+    default_model_params = formatter.get_default_model_params()
+    default_fixed_params = formatter.get_fixed_params()
+
     model_class, loss_fn = load_model_class_and_loss(args.model)
 
     data_path = Path(args.data_path)
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    checkpoint_path = save_dir / f"{args.model}_best.pt"
+    metrics_dir = Path(args.metrics_dir)
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+
+    model_save_path = save_dir / f"{args.model}_best.pt"
+    history_path = metrics_dir / f"{args.model}_training_history.json"
 
     print("Loading processed electricity data...")
     df = pd.read_csv(data_path)
     print(f"Full data shape: {df.shape}")
 
     print("Formatting data...")
-    formatter = ElectricityFormatter()
     train_df, valid_df, test_df = formatter.split_data(df)
 
     print("Full train dataframe shape:", train_df.shape)
     print("Full valid dataframe shape:", valid_df.shape)
     print("Full test dataframe shape:", test_df.shape)
 
-    train_df = select_subset_of_ids(train_df, args.num_train_ids, random_state=42)
-    valid_df = select_subset_of_ids(valid_df, args.num_valid_ids, random_state=42)
+    if args.num_train_ids is not None:
+        print(f"Selecting subset of train IDs: {args.num_train_ids}")
+        train_df = select_subset_of_ids(train_df, args.num_train_ids, random_state=42)
 
-    print("Train dataframe shape after ID subset:", train_df.shape)
-    print("Valid dataframe shape after ID subset:", valid_df.shape)
-    print("Train unique IDs:", train_df["id"].nunique())
-    print("Valid unique IDs:", valid_df["id"].nunique())
+    if args.num_valid_ids is not None:
+        print(f"Selecting subset of valid IDs: {args.num_valid_ids}")
+        valid_df = select_subset_of_ids(valid_df, args.num_valid_ids, random_state=42)
+
+    print("Train dataframe shape:", train_df.shape)
+    print("Valid dataframe shape:", valid_df.shape)
 
     print("Building datasets...")
     train_dataset = TFTDataset(train_df, formatter)
     valid_dataset = TFTDataset(valid_df, formatter)
 
-    train_dataset.summary()
-    valid_dataset.summary()
-
     print("Creating dataloaders...")
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-    )
-
-    valid_loader = DataLoader(
-        valid_dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-    )
+    batch_size = args.batch_size if args.batch_size is not None else default_model_params["minibatch_size"]
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
 
     print(f"Using device: {device}")
     model = model_class(formatter).to(device)
+    learning_rate = args.learning_rate if args.learning_rate is not None else default_model_params["learning_rate"]
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    num_epochs = args.num_epochs if args.num_epochs is not None else default_fixed_params["num_epochs"]
+    early_stopping_patience = args.early_stopping_patience if args.early_stopping_patience is not None else default_fixed_params["early_stopping_patience"]
+    max_gradient_norm = args.max_gradient_norm if args.max_gradient_norm is not None else default_model_params.get("max_gradient_norm", None)
 
     best_valid_loss = float("inf")
+    best_epoch = -1
+    epochs_without_improvement = 0
+    training_history = []
 
     print(f"Starting training for model: {args.model}")
-    for epoch in range(args.num_epochs):
+    for epoch in range(num_epochs):
         epoch_start = time.time()
 
         train_loss = train_one_epoch(
@@ -189,6 +202,7 @@ def main(args):
             device=device,
             epoch_index=epoch,
             print_every=args.print_every,
+            max_gradient_norm=max_gradient_norm,
         )
 
         valid_loss = evaluate(
@@ -200,8 +214,17 @@ def main(args):
 
         epoch_time = time.time() - epoch_start
 
+        training_history.append(
+            {
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "valid_loss": valid_loss,
+                "epoch_time_seconds": epoch_time,
+            }
+        )
+
         print(
-            f"\nEpoch {epoch + 1}/{args.num_epochs} completed | "
+            f"\nEpoch {epoch + 1}/{num_epochs} completed | "
             f"Train Loss: {train_loss:.6f} | "
             f"Valid Loss: {valid_loss:.6f} | "
             f"Time: {epoch_time:.1f}s\n"
@@ -209,68 +232,55 @@ def main(args):
 
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
-            torch.save(model.state_dict(), checkpoint_path)
-            print(f"New best model saved to: {checkpoint_path}")
+            best_epoch = epoch + 1
+            epochs_without_improvement = 0
+            torch.save(model.state_dict(), model_save_path)
+            print(f"New best model saved to: {model_save_path}")
+        else:
+            epochs_without_improvement += 1
+            print(f"No improvement for {epochs_without_improvement} epoch(s).")
+
+        if epochs_without_improvement >= early_stopping_patience:
+            print(f"Early stopping triggered after epoch {epoch + 1}.")
+            break
+
+    with open(history_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "model": args.model,
+                "best_valid_loss": best_valid_loss,
+                "best_epoch": best_epoch,
+                "batch_size": batch_size,
+                "learning_rate": learning_rate,
+                "num_epochs_requested": num_epochs,
+                "early_stopping_patience": early_stopping_patience,
+                "history": training_history,
+            },
+            f,
+            indent=2,
+        )
 
     print("Training finished.")
     print(f"Best validation loss: {best_valid_loss:.6f}")
-    print(f"Best checkpoint saved at: {checkpoint_path}")
+    print(f"Best epoch: {best_epoch}")
+    print(f"Training history saved to: {history_path}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument(
-        "--model",
-        type=str,
-        required=True,
-        choices=list(MODEL_REGISTRY.keys()),
-        help="Which model architecture to train.",
-    )
-    parser.add_argument(
-        "--data_path",
-        type=str,
-        default="data/electricity_processed.csv",
-        help="Path to processed electricity csv.",
-    )
-    parser.add_argument(
-        "--save_dir",
-        type=str,
-        default="checkpoints",
-        help="Directory where model checkpoints are saved.",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=32,
-    )
-    parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=1e-3,
-    )
-    parser.add_argument(
-        "--num_epochs",
-        type=int,
-        default=2,
-    )
-    parser.add_argument(
-        "--print_every",
-        type=int,
-        default=20,
-    )
-    parser.add_argument(
-        "--num_train_ids",
-        type=int,
-        default=None,
-        help="Optional subset of train IDs for quick experiments.",
-    )
-    parser.add_argument(
-        "--num_valid_ids",
-        type=int,
-        default=None,
-        help="Optional subset of validation IDs for quick experiments.",
-    )
+    parser.add_argument("--model", type=str, required=True, choices=list(MODEL_REGISTRY.keys()))
+    parser.add_argument("--data_path", type=str, default="data/electricity_processed.csv")
+    parser.add_argument("--save_dir", type=str, default="outputs/checkpoints")
+    parser.add_argument("--metrics_dir", type=str, default="outputs/metrics")
+    parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--learning_rate", type=float, default=None)
+    parser.add_argument("--num_epochs", type=int, default=None)
+    parser.add_argument("--early_stopping_patience", type=int, default=None)
+    parser.add_argument("--max_gradient_norm", type=float, default=None)
+    parser.add_argument("--print_every", type=int, default=20)
+    parser.add_argument("--num_train_ids", type=int, default=None)
+    parser.add_argument("--num_valid_ids", type=int, default=None)
 
     args = parser.parse_args()
     main(args)
