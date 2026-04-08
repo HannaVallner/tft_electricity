@@ -3,8 +3,8 @@ __pycache__/
 *.pyc
 
 # Data
-data/
-*.csv
+data/*
+!data/.gitkeep
 
 # Local test scripts
 tests/
@@ -13,4 +13,13 @@ tests/
 .vscode/
 
 # Outputs
-outputs/
+outputs/*
+!outputs/.gitkeep
+!outputs/checkpoints/
+!outputs/checkpoints/.gitkeep
+!outputs/metrics/
+!outputs/metrics/.gitkeep
+!outputs/plots/
+!outputs/plots/.gitkeep
+!outputs/predictions/
+!outputs/predictions/.gitkeep
