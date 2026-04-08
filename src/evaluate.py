@@ -38,6 +38,31 @@ def normalised_quantile_loss(y_true, y_pred, quantile):
         return float("nan")
     return float(2.0 * np.mean(weighted_errors) / normaliser)
 
+def compute_quantile_calibration_metrics(merged_df):
+    """
+    Compute simple calibration diagnostics for predicted quantiles.
+    """
+    target = merged_df["target"].to_numpy()
+    p10 = merged_df["p10"].to_numpy()
+    p50 = merged_df["p50"].to_numpy()
+    p90 = merged_df["p90"].to_numpy()
+
+    observed_q10 = float(np.mean(target <= p10))
+    observed_q50 = float(np.mean(target <= p50))
+    observed_q90 = float(np.mean(target <= p90))
+
+    interval_80_coverage = float(np.mean((target >= p10) & (target <= p90)))
+    below_p10_rate = float(np.mean(target < p10))
+    above_p90_rate = float(np.mean(target > p90))
+
+    return {
+        "observed_q10": observed_q10,
+        "observed_q50": observed_q50,
+        "observed_q90": observed_q90,
+        "interval_80_coverage": interval_80_coverage,
+        "below_p10_rate": below_p10_rate,
+        "above_p90_rate": above_p90_rate,
+    }
 
 def build_targets_dataframe(test_dataset, formatter):
     rows = []
@@ -125,6 +150,119 @@ def make_plot(merged_df, model_name, plots_dir):
     plt.close()
     return plot_path
 
+def make_forecast_window_plot(merged_df, model_name, plots_dir):
+    """
+    Plot one complete 24-hour forecast window for a single forecast origin.
+
+    This is useful for thesis/report visualization because it shows
+    how the quantile forecast behaves across the whole prediction horizon.
+    """
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pick first available forecast window
+    first_row = merged_df.iloc[0]
+    selected_id = first_row["id"]
+    selected_origin = first_row["forecast_origin"]
+
+    plot_df = (
+        merged_df[
+            (merged_df["id"] == selected_id) &
+            (merged_df["forecast_origin"] == selected_origin)
+        ]
+        .sort_values("horizon")
+        .copy()
+    )
+
+    if plot_df.empty:
+        return None
+
+    x = plot_df["horizon"].values
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(x, plot_df["target"].values, marker="o", label="target")
+    plt.plot(x, plot_df["p50"].values, marker="o", label="p50")
+    plt.fill_between(
+        x=x,
+        y1=plot_df["p10"].values,
+        y2=plot_df["p90"].values,
+        alpha=0.25,
+        label="p10-p90",
+    )
+    plt.title(f"{model_name}: example 24-hour forecast window")
+    plt.xlabel("Horizon step")
+    plt.ylabel("Power usage")
+    plt.xticks(x)
+    plt.legend()
+    plt.tight_layout()
+
+    plot_path = plots_dir / f"{model_name}_forecast_window_plot.png"
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+    return plot_path
+
+def make_reliability_plot(merged_df, model_name, plots_dir):
+    """
+    Reliability diagram for predicted quantiles.
+    """
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    nominal = np.array([0.1, 0.5, 0.9], dtype=float)
+    observed = np.array([
+        np.mean(merged_df["target"].to_numpy() <= merged_df["p10"].to_numpy()),
+        np.mean(merged_df["target"].to_numpy() <= merged_df["p50"].to_numpy()),
+        np.mean(merged_df["target"].to_numpy() <= merged_df["p90"].to_numpy()),
+    ], dtype=float)
+
+    plt.figure(figsize=(6, 6))
+    plt.plot([0, 1], [0, 1], linestyle="--", label="ideal")
+    plt.plot(nominal, observed, marker="o", label="model")
+    plt.xlim(0, 1)
+    plt.ylim(0, 1)
+    plt.xlabel("Nominal quantile")
+    plt.ylabel("Observed proportion")
+    plt.title(f"{model_name}: quantile reliability diagram")
+    plt.legend()
+    plt.tight_layout()
+
+    plot_path = plots_dir / f"{model_name}_reliability_plot.png"
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+    return plot_path
+
+def make_interval_calibration_plot(merged_df, model_name, plots_dir):
+    """
+    Plot observed vs expected coverage/error rates for the p10-p90 interval.
+    """
+    plots_dir.mkdir(parents=True, exist_ok=True)
+
+    target = merged_df["target"].to_numpy()
+    p10 = merged_df["p10"].to_numpy()
+    p90 = merged_df["p90"].to_numpy()
+
+    observed_values = [
+        float(np.mean((target >= p10) & (target <= p90))),  # expected 0.80
+        float(np.mean(target < p10)),                       # expected 0.10
+        float(np.mean(target > p90)),                       # expected 0.10
+    ]
+    expected_values = [0.80, 0.10, 0.10]
+    labels = ["inside p10-p90", "below p10", "above p90"]
+
+    x = np.arange(len(labels))
+    width = 0.35
+
+    plt.figure(figsize=(8, 5))
+    plt.bar(x - width / 2, expected_values, width=width, label="expected")
+    plt.bar(x + width / 2, observed_values, width=width, label="observed")
+    plt.xticks(x, labels, rotation=15)
+    plt.ylabel("Proportion")
+    plt.title(f"{model_name}: interval calibration check")
+    plt.legend()
+    plt.tight_layout()
+
+    plot_path = plots_dir / f"{model_name}_interval_calibration_plot.png"
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+    return plot_path
 
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -181,6 +319,9 @@ def main(args):
         "num_prediction_rows": int(len(merged_df)),
     }
 
+    calibration_metrics = compute_quantile_calibration_metrics(merged_df)
+    metrics.update(calibration_metrics)
+
     metrics["test_nql_mean"] = float(
         np.nanmean([metrics["test_nql_p10"], metrics["test_nql_p50"], metrics["test_nql_p90"]])
     )
@@ -189,6 +330,18 @@ def main(args):
     if plot_path is not None:
         metrics["example_plot"] = str(plot_path)
 
+    forecast_window_plot_path = make_forecast_window_plot(merged_df, args.model, plots_dir)
+    if forecast_window_plot_path is not None:
+        metrics["forecast_window_plot"] = str(forecast_window_plot_path)
+
+    reliability_plot_path = make_reliability_plot(merged_df, args.model, plots_dir)
+    if reliability_plot_path is not None:
+        metrics["reliability_plot"] = str(reliability_plot_path)
+
+    interval_calibration_plot_path = make_interval_calibration_plot(merged_df, args.model, plots_dir)
+    if interval_calibration_plot_path is not None:
+        metrics["interval_calibration_plot"] = str(interval_calibration_plot_path)
+    
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
