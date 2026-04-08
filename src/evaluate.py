@@ -127,7 +127,7 @@ def make_plot(merged_df, model_name, plots_dir):
     if plot_df.empty:
         return None
 
-    x = np.arange(len(plot_df))
+    x = plot_df["target_time_dt"]
     plt.figure(figsize=(12, 5))
     plt.plot(x, plot_df["target"].values, label="target")
     plt.plot(x, plot_df["p50"].values, label="p50")
@@ -139,8 +139,9 @@ def make_plot(merged_df, model_name, plots_dir):
         label="p10-p90",
     )
     plt.title(f"{model_name}: first series, horizon 1")
-    plt.xlabel("ordered prediction point")
+    plt.xlabel("Time")
     plt.ylabel("power usage")
+    plt.xticks(rotation=45)
     plt.legend()
     plt.tight_layout()
 
@@ -175,7 +176,7 @@ def make_forecast_window_plot(merged_df, model_name, plots_dir):
     if plot_df.empty:
         return None
 
-    x = plot_df["horizon"].values
+    x = plot_df["target_time_dt"]
 
     plt.figure(figsize=(10, 5))
     plt.plot(x, plot_df["target"].values, marker="o", label="target")
@@ -188,9 +189,10 @@ def make_forecast_window_plot(merged_df, model_name, plots_dir):
         label="p10-p90",
     )
     plt.title(f"{model_name}: example 24-hour forecast window")
-    plt.xlabel("Horizon step")
+    plt.xlabel("Time")
     plt.ylabel("Power usage")
     plt.xticks(x)
+    plt.xticks(rotation=45)
     plt.legend()
     plt.tight_layout()
 
@@ -305,6 +307,16 @@ def main(args):
 
     merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
     merged_df = predictions_df.merge(targets_df, on=merge_keys, how="inner")
+
+    start_date = pd.Timestamp("2012-01-01 00:00:00")
+
+    merged_df["forecast_origin_dt"] = (
+        start_date + pd.to_timedelta(merged_df["forecast_origin"], unit="h")
+    )
+
+    merged_df["target_time_dt"] = (
+        start_date + pd.to_timedelta(merged_df["target_time"], unit="h")
+    )
 
     if merged_df.empty:
         raise ValueError("Merged evaluation dataframe is empty.")
