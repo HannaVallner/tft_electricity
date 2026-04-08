@@ -4,11 +4,13 @@ __pycache__/
 
 # Data
 data/
-.csv
+*.csv
 
 # Local test scripts
 tests/
 
-
 # VSCode
 .vscode/
+
+# Outputs
+outputs/
