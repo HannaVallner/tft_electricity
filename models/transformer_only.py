@@ -82,6 +82,44 @@ class TemporalFusionTransformer(nn.Module):
             if tup[2] == InputTypes.TARGET
         ])
 
+        self.obs_real_indices = [
+            i for i, (_, _, role) in enumerate(self.real_inputs)
+            if role == InputTypes.TARGET
+        ]
+
+        self.static_regular_indices = [
+            i for i, (_, _, role) in enumerate(self.real_inputs)
+            if role == InputTypes.STATIC_INPUT
+        ]
+
+        self.static_categorical_indices = [
+            i for i, (_, _, role) in enumerate(self.categorical_inputs)
+            if role == InputTypes.STATIC_INPUT
+        ]
+
+        self.known_regular_indices = [
+            i for i, (_, _, role) in enumerate(self.real_inputs)
+            if role == InputTypes.KNOWN_INPUT
+        ]
+
+        self.known_categorical_indices = [
+            i for i, (_, _, role) in enumerate(self.categorical_inputs)
+            if role == InputTypes.KNOWN_INPUT
+        ]
+
+        self.unknown_regular_indices = [
+            i for i in range(self.num_regular_variables)
+            if i not in self.known_regular_indices
+            and i not in self.obs_real_indices
+            and i not in self.static_regular_indices
+        ]
+
+        self.unknown_categorical_indices = [
+            i for i in range(self.num_categorical_variables)
+            if i not in self.known_categorical_indices
+            and i not in self.static_categorical_indices
+        ]
+
         # --------------------------------------------------
         # Category counts for embeddings
         # --------------------------------------------------
@@ -121,8 +159,32 @@ class TemporalFusionTransformer(nn.Module):
         # We preserve embeddings, but instead of VSN we concatenate all
         # variable embeddings and project them back to hidden_dim.
         # --------------------------------------------------
-        self.input_mixer = TimeDistributed(
-            nn.Linear(self.hidden_dim * self.input_size, self.hidden_dim)
+        self.num_static_inputs = (
+            len(self.static_regular_indices)
+            + len(self.static_categorical_indices)
+        )
+
+        self.num_historical_inputs = (
+            len(self.unknown_regular_indices)
+            + len(self.unknown_categorical_indices)
+            + len(self.known_regular_indices)
+            + len(self.known_categorical_indices)
+            + len(self.obs_real_indices)
+            + self.num_static_inputs
+        )
+
+        self.num_future_inputs = (
+            len(self.known_regular_indices)
+            + len(self.known_categorical_indices)
+            + self.num_static_inputs
+        )
+
+        self.historical_input_mixer = TimeDistributed(
+            nn.Linear(self.hidden_dim * self.num_historical_inputs, self.hidden_dim)
+        )
+
+        self.future_input_mixer = TimeDistributed(
+            nn.Linear(self.hidden_dim * self.num_future_inputs, self.hidden_dim)
         )
 
         # --------------------------------------------------
@@ -181,28 +243,67 @@ class TemporalFusionTransformer(nn.Module):
 
     def _embed_inputs(self, all_inputs):
         """
-        Apply TFT-style per-variable embeddings.
+        Apply per-variable embeddings and separate them by role.
 
         Returns:
-            combined_embeddings: (B, T, H, N_variables)
+            unknown_inputs: (B, T, H, N_unknown) or None
+            known_inputs:   (B, T, H, N_known)
+            obs_inputs:     (B, T, H, N_obs)
+            static_inputs:  (B, H, N_static) or None
         """
         regular_inputs, categorical_inputs = self._split_inputs(all_inputs)
 
-        embedded_variables = []
-
-        # Real-valued variables
+        real_embeddings = []
         for i in range(self.num_regular_variables):
             emb = self.real_variable_projections[i](regular_inputs[:, :, i:i + 1])  # (B, T, H)
-            embedded_variables.append(emb)
+            real_embeddings.append(emb)
 
-        # Categorical variables
+        categorical_embeddings = []
         for i in range(self.num_categorical_variables):
             cat_values = categorical_inputs[:, :, i].long()
             emb = self.categorical_variable_embeddings[i](cat_values)  # (B, T, H)
-            embedded_variables.append(emb)
+            categorical_embeddings.append(emb)
 
-        combined_embeddings = torch.stack(embedded_variables, dim=-1)  # (B, T, H, N)
-        return combined_embeddings
+        static_inputs_list = []
+
+        for i in self.static_regular_indices:
+            static_inputs_list.append(real_embeddings[i][:, 0, :])  # (B, H)
+
+        for i in self.static_categorical_indices:
+            static_inputs_list.append(categorical_embeddings[i][:, 0, :])  # (B, H)
+
+        if len(static_inputs_list) > 0:
+            static_inputs = torch.stack(static_inputs_list, dim=-1)  # (B, H, N_static)
+        else:
+            static_inputs = None
+
+        obs_inputs_list = [real_embeddings[i] for i in self.obs_real_indices]
+        obs_inputs = torch.stack(obs_inputs_list, dim=-1)  # (B, T, H, N_obs)
+
+        unknown_inputs_list = []
+
+        for i in self.unknown_regular_indices:
+            unknown_inputs_list.append(real_embeddings[i])
+
+        for i in self.unknown_categorical_indices:
+            unknown_inputs_list.append(categorical_embeddings[i])
+
+        if len(unknown_inputs_list) > 0:
+            unknown_inputs = torch.stack(unknown_inputs_list, dim=-1)  # (B, T, H, N_unknown)
+        else:
+            unknown_inputs = None
+
+        known_inputs_list = []
+
+        for i in self.known_regular_indices:
+            known_inputs_list.append(real_embeddings[i])
+
+        for i in self.known_categorical_indices:
+            known_inputs_list.append(categorical_embeddings[i])
+
+        known_inputs = torch.stack(known_inputs_list, dim=-1)  # (B, T, H, N_known)
+
+        return unknown_inputs, known_inputs, obs_inputs, static_inputs
 
     def forward(self, all_inputs, return_attention=False):
         """
@@ -222,19 +323,56 @@ class TemporalFusionTransformer(nn.Module):
             (batch, decoder_steps, output_size * num_quantiles)
         """
         # --------------------------------------------------
-        # Step 1: embed all variables independently
+        # Step 1: embed inputs and split by role
         # --------------------------------------------------
-        embedded_inputs = self._embed_inputs(all_inputs)  # (B, T, H, N)
+        unknown_inputs, known_inputs, obs_inputs, static_inputs = self._embed_inputs(all_inputs)
+
+        encoder_steps = self.num_encoder_steps
 
         # --------------------------------------------------
-        # Step 2: flatten variables and mix into one hidden representation
+        # Step 2: build historical and future inputs separately
+        # historical: unknown + known + observed target
+        # future: known only
         # --------------------------------------------------
-        batch_size, time_steps, hidden_dim, num_vars = embedded_inputs.shape
-        flattened = embedded_inputs.reshape(batch_size, time_steps, hidden_dim * num_vars)
-        temporal_features = self.input_mixer(flattened)  # (B, T, H)
+        historical_parts = []
+        future_parts = []
+
+        if unknown_inputs is not None:
+            historical_parts.append(unknown_inputs[:, :encoder_steps, :, :])
+
+        historical_parts.append(known_inputs[:, :encoder_steps, :, :])
+        historical_parts.append(obs_inputs[:, :encoder_steps, :, :])
+        future_parts.append(known_inputs[:, encoder_steps:, :, :])
+
+        if static_inputs is not None:
+            static_hist = static_inputs.unsqueeze(1).expand(-1, encoder_steps, -1, -1)       # (B, enc, H, N_static)
+            static_future = static_inputs.unsqueeze(1).expand(-1, self.decoder_steps, -1, -1)  # (B, dec, H, N_static)
+
+            historical_parts.append(static_hist)
+            future_parts.append(static_future)
+
+        historical_inputs = torch.cat(historical_parts, dim=-1)   # (B, enc, H, N_hist)
+        future_inputs = torch.cat(future_parts, dim=-1)           # (B, dec, H, N_future)
 
         # --------------------------------------------------
-        # Step 3: causal self-attention
+        # Step 3: mix historical and future variables separately
+        # --------------------------------------------------
+        batch_size, hist_steps, hidden_dim, num_hist_vars = historical_inputs.shape
+        historical_flat = historical_inputs.reshape(
+            batch_size, hist_steps, hidden_dim * num_hist_vars
+        )
+        historical_features = self.historical_input_mixer(historical_flat)  # (B, enc, H)
+
+        batch_size, fut_steps, hidden_dim, num_future_vars = future_inputs.shape
+        future_flat = future_inputs.reshape(
+            batch_size, fut_steps, hidden_dim * num_future_vars
+        )
+        future_features = self.future_input_mixer(future_flat)  # (B, dec, H)
+
+        temporal_features = torch.cat([historical_features, future_features], dim=1)  # (B, T, H)
+
+        # --------------------------------------------------
+        # Step 4: causal self-attention
         # --------------------------------------------------
         mask = get_decoder_mask(self.total_time_steps, device=temporal_features.device)
 
@@ -248,13 +386,13 @@ class TemporalFusionTransformer(nn.Module):
         x, _ = self.post_attention_gate_add_norm(attention_out, temporal_features)
 
         # --------------------------------------------------
-        # Step 4: position-wise TFT feedforward block
+        # Step 5: position-wise TFT feedforward block
         # --------------------------------------------------
         decoder = self.positionwise_grn(x)
         transformer_layer, _ = self.final_gate_add_norm(decoder, x)
 
         # --------------------------------------------------
-        # Step 5: keep decoder horizon only
+        # Step 6: keep decoder horizon only
         # --------------------------------------------------
         decoder_output = transformer_layer[:, self.num_encoder_steps:, :]
         predictions = self.output_layer(decoder_output)
