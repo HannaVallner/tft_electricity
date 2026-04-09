@@ -403,7 +403,6 @@ class TemporalFusionTransformer(nn.Module):
         return unknown_inputs, known_combined_layer, obs_inputs, static_inputs
 
     def forward(self, all_inputs, return_attention=False):
-        batch_size = all_inputs.size(0)
         encoder_steps = self.num_encoder_steps
 
         unknown_inputs, known_combined_layer, obs_inputs, static_inputs = self._embed_inputs(

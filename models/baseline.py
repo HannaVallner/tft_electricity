@@ -237,10 +237,6 @@ class TemporalFusionTransformer(nn.Module):
         # --------------------------------------------------------------
         # Index bookkeeping
         # --------------------------------------------------------------
-        self.real_input_positions = list(range(self.num_regular_variables))
-        self.categorical_input_positions = list(
-            range(self.num_regular_variables, self.input_size)
-        )
 
         self.obs_real_indices = [
             i for i, (_, _, role) in enumerate(self.real_inputs)
