@@ -308,7 +308,7 @@ def main(args):
     merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
     merged_df = predictions_df.merge(targets_df, on=merge_keys, how="inner")
 
-    start_date = pd.Timestamp("2012-01-01 00:00:00")
+    start_date = pd.Timestamp("2011-01-01 00:00:00")
 
     merged_df["forecast_origin_dt"] = (
         start_date + pd.to_timedelta(merged_df["forecast_origin"], unit="h")
