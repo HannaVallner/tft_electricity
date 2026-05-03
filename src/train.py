@@ -3,7 +3,8 @@ import argparse
 import importlib
 import json
 import time
-
+import random
+import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
@@ -12,6 +13,14 @@ from data_formatter import ElectricityFormatter
 from dataset import TFTDataset
 from registry import MODEL_REGISTRY
 
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def load_model_class_and_loss(model_name):
     """
@@ -127,6 +136,7 @@ def train_one_epoch(model, dataloader, optimizer, loss_fn, device, epoch_index, 
 
 
 def main(args):
+    set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     formatter = ElectricityFormatter()
@@ -142,8 +152,8 @@ def main(args):
     metrics_dir = Path(args.metrics_dir)
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    model_save_path = save_dir / f"{args.model}_best.pt"
-    history_path = metrics_dir / f"{args.model}_training_history.json"
+    model_save_path = save_dir / f"{args.model}_seed_{args.seed}_best.pt"
+    history_path = metrics_dir / f"{args.model}_seed_{args.seed}_training_history.json"
 
     print("Loading processed electricity data...")
     df = pd.read_csv(data_path)
@@ -158,22 +168,31 @@ def main(args):
 
     if args.num_train_ids is not None:
         print(f"Selecting subset of train IDs: {args.num_train_ids}")
-        train_df = select_subset_of_ids(train_df, args.num_train_ids, random_state=42)
-
+        train_df = select_subset_of_ids(train_df, args.num_train_ids, random_state=args.seed)
+    
     if args.num_valid_ids is not None:
         print(f"Selecting subset of valid IDs: {args.num_valid_ids}")
-        valid_df = select_subset_of_ids(valid_df, args.num_valid_ids, random_state=42)
+        valid_df = select_subset_of_ids(valid_df, args.num_valid_ids, random_state=args.seed)
 
     print("Train dataframe shape:", train_df.shape)
     print("Valid dataframe shape:", valid_df.shape)
 
+    print(f"Using seed: {args.seed}")
+    
     print("Building datasets...")
     train_dataset = TFTDataset(train_df, formatter)
     valid_dataset = TFTDataset(valid_df, formatter)
 
     print("Creating dataloaders...")
     batch_size = args.batch_size if args.batch_size is not None else default_model_params["minibatch_size"]
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    generator = torch.Generator()
+    generator.manual_seed(args.seed)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        generator=generator,
+    )
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
 
     print(f"Using device: {device}")
@@ -255,6 +274,7 @@ def main(args):
                 "num_epochs_requested": num_epochs,
                 "early_stopping_patience": early_stopping_patience,
                 "history": training_history,
+                "seed": args.seed,
             },
             f,
             indent=2,
@@ -281,6 +301,7 @@ if __name__ == "__main__":
     parser.add_argument("--print_every", type=int, default=20)
     parser.add_argument("--num_train_ids", type=int, default=None)
     parser.add_argument("--num_valid_ids", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
     main(args)
