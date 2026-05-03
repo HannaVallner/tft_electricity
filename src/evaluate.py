@@ -265,6 +265,95 @@ def make_interval_calibration_plot(merged_df, model_name, plots_dir):
     plt.close()
     return plot_path
 
+def make_all_models_p50_comparison_plot(args, current_merged_df):
+    """
+    Plot the target and p50 forecasts for all model variants on the same
+    24-hour forecast window.
+
+    This function is run during evaluation, but only creates the plot when
+    the current model is the last model in the comparison list and all needed
+    prediction files exist.
+    """
+    models = ["baseline", "no_attention", "mlp_features", "no_lstm", "transformer_only"]
+
+    if args.model != models[-1]:
+        return None
+
+    plots_dir = Path(args.plots_dir)
+    comparison_dir = plots_dir.parent / "model_comparison"
+    comparison_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use the same forecast window as the current evaluated dataframe
+    first_row = current_merged_df.iloc[0]
+    selected_id = first_row["id"]
+    selected_origin = first_row["forecast_origin"]
+
+    base_window = (
+        current_merged_df[
+            (current_merged_df["id"] == selected_id)
+            & (current_merged_df["forecast_origin"] == selected_origin)
+        ]
+        .sort_values("horizon")
+        .copy()
+    )
+
+    if base_window.empty:
+        return None
+
+    plt.figure(figsize=(10, 5))
+
+    # Plot true target once
+    x = base_window["target_time_dt"]
+    plt.plot(
+        x,
+        base_window["target"].values,
+        marker="o",
+        linewidth=2.5,
+        label="target",
+    )
+
+    merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
+
+    for model_name in models:
+        prediction_path = Path("outputs/predictions") / f"{model_name}_predictions.csv"
+
+        if not prediction_path.exists():
+            print(f"Skipping {model_name}: prediction file not found at {prediction_path}")
+            continue
+
+        predictions_df = pd.read_csv(prediction_path)
+
+        model_window = predictions_df.merge(
+            base_window[merge_keys + ["target_time_dt"]],
+            on=merge_keys,
+            how="inner",
+        ).sort_values("horizon")
+
+        if model_window.empty:
+            print(f"Skipping {model_name}: no matching forecast window")
+            continue
+
+        plt.plot(
+            model_window["target_time_dt"],
+            model_window["p50"].values,
+            marker="o",
+            linewidth=1.6,
+            label=model_name,
+        )
+
+    plt.title("Median forecast comparison across model variants")
+    plt.xlabel("Time")
+    plt.ylabel("Power usage")
+    plt.xticks(rotation=45)
+    plt.legend()
+    plt.tight_layout()
+
+    plot_path = comparison_dir / "all_models_p50_comparison.png"
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+
+    return plot_path
+
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -353,6 +442,10 @@ def main(args):
     if interval_calibration_plot_path is not None:
         metrics["interval_calibration_plot"] = str(interval_calibration_plot_path)
     
+    all_models_plot_path = make_all_models_p50_comparison_plot(args, merged_df)
+    if all_models_plot_path is not None:
+        metrics["all_models_p50_comparison_plot"] = str(all_models_plot_path)
+
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
