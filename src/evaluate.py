@@ -315,8 +315,10 @@ def make_all_models_p50_comparison_plot(args, current_merged_df):
     merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
 
     for model_name in models:
-        prediction_path = Path("outputs/predictions") / f"{model_name}_predictions.csv"
-
+        if args.seed is None:
+            prediction_path = Path("outputs/predictions") / f"{model_name}_predictions.csv"
+        else:
+            prediction_path = Path("outputs/predictions") / f"{model_name}_seed_{args.seed}_predictions.csv"
         if not prediction_path.exists():
             print(f"Skipping {model_name}: prediction file not found at {prediction_path}")
             continue
@@ -348,7 +350,10 @@ def make_all_models_p50_comparison_plot(args, current_merged_df):
     plt.legend()
     plt.tight_layout()
 
-    plot_path = comparison_dir / "all_models_p50_comparison.png"
+    if args.seed is None:
+        plot_path = comparison_dir / "all_models_p50_comparison.png"
+    else:
+        plot_path = comparison_dir / f"all_models_seed_{args.seed}_p50_comparison.png"
     plt.savefig(plot_path, dpi=150)
     plt.close()
 
@@ -357,6 +362,7 @@ def make_all_models_p50_comparison_plot(args, current_merged_df):
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    run_name = args.model if args.seed is None else f"{args.model}_seed_{args.seed}"
     data_path = Path(args.data_path)
     checkpoint_path = Path(args.checkpoint_path)
     predictions_path = Path(args.predictions_path)
@@ -385,7 +391,7 @@ def main(args):
     model = model_class(formatter).to(device)
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     model.eval()
-
+    print(f"Running evaluation for: {run_name}")
     validation_loss = evaluate_validation_loss(model, valid_loader, loss_fn, device)
 
     if not predictions_path.exists():
@@ -412,6 +418,7 @@ def main(args):
 
     metrics = {
         "model": args.model,
+        "seed": args.seed,
         "validation_loss": float(validation_loss),
         "test_nql_p10": normalised_quantile_loss(merged_df["target"], merged_df["p10"], 0.1),
         "test_nql_p50": normalised_quantile_loss(merged_df["target"], merged_df["p50"], 0.5),
@@ -426,19 +433,19 @@ def main(args):
         np.nanmean([metrics["test_nql_p10"], metrics["test_nql_p50"], metrics["test_nql_p90"]])
     )
 
-    plot_path = make_plot(merged_df, args.model, plots_dir)
+    plot_path = make_plot(merged_df, run_name, plots_dir)
     if plot_path is not None:
         metrics["example_plot"] = str(plot_path)
 
-    forecast_window_plot_path = make_forecast_window_plot(merged_df, args.model, plots_dir)
+    forecast_window_plot_path = make_forecast_window_plot(merged_df, run_name, plots_dir)
     if forecast_window_plot_path is not None:
         metrics["forecast_window_plot"] = str(forecast_window_plot_path)
 
-    reliability_plot_path = make_reliability_plot(merged_df, args.model, plots_dir)
+    reliability_plot_path = make_reliability_plot(merged_df, run_name, plots_dir)
     if reliability_plot_path is not None:
         metrics["reliability_plot"] = str(reliability_plot_path)
 
-    interval_calibration_plot_path = make_interval_calibration_plot(merged_df, args.model, plots_dir)
+    interval_calibration_plot_path = make_interval_calibration_plot(merged_df, run_name, plots_dir)
     if interval_calibration_plot_path is not None:
         metrics["interval_calibration_plot"] = str(interval_calibration_plot_path)
     
@@ -463,6 +470,7 @@ if __name__ == "__main__":
     parser.add_argument("--metrics_path", type=str, required=True)
     parser.add_argument("--plots_dir", type=str, default="outputs/plots")
     parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--seed", type=int, default=None)
 
     args = parser.parse_args()
     main(args)
