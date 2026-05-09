@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from registry import MODEL_REGISTRY
+from data_formatter import ElectricityFormatter
+from dataset import TFTDataset
 
 def format_mean_std(mean_value, std_value):
     if pd.isna(std_value):
@@ -165,6 +167,32 @@ def save_metric_plot(summary_df, metric_name, plots_dir):
     plt.close()
     return plot_path
 
+def build_targets_dataframe(test_dataset, formatter):
+    rows = []
+    encoder_steps = formatter.get_fixed_params()["num_encoder_steps"]
+
+    for raw_sample in test_dataset.samples:
+        sample_id = raw_sample["identifier"][0, 0]
+        full_times = raw_sample["time"][:, 0]
+        forecast_origin = full_times[encoder_steps - 1]
+        target_times = full_times[encoder_steps:]
+        targets = raw_sample["outputs"].numpy().reshape(-1)
+
+        for step, value in enumerate(targets, start=1):
+            rows.append(
+                {
+                    "id": sample_id,
+                    "forecast_origin": forecast_origin,
+                    "target_time": target_times[step - 1],
+                    "horizon": step,
+                    "target": value,
+                }
+            )
+
+    targets_df = pd.DataFrame(rows)
+    targets_df = formatter.format_predictions(targets_df)
+    return targets_df
+
 def save_calibration_comparison_plot(summary_df, metric_name, expected_value, plots_dir):
     """
     Save calibration comparison plot with mean ± std and expected reference line.
@@ -279,49 +307,51 @@ def save_representative_p50_comparison_plot(
     representative_seed,
     predictions_dir,
     plots_dir,
+    data_path,
 ):
-    """
-    Plot target and p50 forecasts for all model variants using one
-    representative shared seed.
-    """
-    models = list(MODEL_REGISTRY.keys())
+    models = ["baseline", "no_attention", "mlp_features", "no_lstm", "transformer_only"]
+
+    formatter = ElectricityFormatter()
+    df = pd.read_csv(data_path)
+    _, _, test_df = formatter.split_data(df)
+    test_dataset = TFTDataset(test_df, formatter)
+    targets_df = build_targets_dataframe(test_dataset, formatter)
 
     prediction_frames = {}
 
     for model_name in models:
-        prediction_path = (
-            predictions_dir
-            / f"{model_name}_seed_{representative_seed}_predictions.csv"
-        )
+        prediction_path = predictions_dir / f"{model_name}_seed_{representative_seed}_predictions.csv"
 
         if not prediction_path.exists():
-            print(f"Skipping representative p50 plot: missing {prediction_path}")
+            print(f"Skipping p50 comparison plot: missing {prediction_path}")
             return None
 
         prediction_frames[model_name] = pd.read_csv(prediction_path)
 
-    base_model = models[0]
-    base_df = prediction_frames[base_model]
+    merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
 
-    if base_df.empty:
-        print("Skipping representative p50 plot: base prediction file is empty")
+    base_merged = prediction_frames[models[0]].merge(
+        targets_df,
+        on=merge_keys,
+        how="inner",
+    )
+
+    if base_merged.empty:
+        print("Skipping p50 comparison plot: merged base dataframe is empty")
         return None
 
-    selected_id = base_df["id"].iloc[0]
-    selected_origin = base_df["forecast_origin"].iloc[0]
+    first_row = base_merged.iloc[0]
+    selected_id = first_row["id"]
+    selected_origin = first_row["forecast_origin"]
 
     base_window = (
-        base_df[
-            (base_df["id"] == selected_id)
-            & (base_df["forecast_origin"] == selected_origin)
+        base_merged[
+            (base_merged["id"] == selected_id)
+            & (base_merged["forecast_origin"] == selected_origin)
         ]
         .sort_values("horizon")
         .copy()
     )
-
-    if base_window.empty:
-        print("Skipping representative p50 plot: selected forecast window is empty")
-        return None
 
     start_date = pd.Timestamp("2011-01-01 00:00:00")
     base_window["target_time_dt"] = (
@@ -335,23 +365,28 @@ def save_representative_p50_comparison_plot(
         base_window["target"].values,
         marker="o",
         linewidth=2.5,
-        label="Target",
+        label="target",
     )
 
-    merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
-
     for model_name in models:
-        model_df = prediction_frames[model_name]
-
-        model_window = model_df.merge(
-            base_window[merge_keys + ["target_time_dt"]],
+        model_merged = prediction_frames[model_name].merge(
+            targets_df,
             on=merge_keys,
             how="inner",
-        ).sort_values("horizon")
+        )
 
-        if model_window.empty:
-            print(f"Skipping {model_name}: no matching representative forecast window")
-            continue
+        model_window = (
+            model_merged[
+                (model_merged["id"] == selected_id)
+                & (model_merged["forecast_origin"] == selected_origin)
+            ]
+            .sort_values("horizon")
+            .copy()
+        )
+
+        model_window["target_time_dt"] = (
+            start_date + pd.to_timedelta(model_window["target_time"], unit="h")
+        )
 
         plt.plot(
             model_window["target_time_dt"],
@@ -481,6 +516,7 @@ def main(args):
         representative_seed=representative_seed,
         predictions_dir=predictions_dir,
         plots_dir=plots_dir,
+        data_path=Path(args.data_path),
     )
 
     if p50_comparison_plot_path is not None:
@@ -517,5 +553,6 @@ if __name__ == "__main__":
     parser.add_argument("--metrics_dir", type=str, default="outputs/metrics")
     parser.add_argument("--plots_dir", type=str, default="outputs/plots")
     parser.add_argument("--predictions_dir", type=str, default="outputs/predictions")
+    parser.add_argument("--data_path", type=str, default="data/electricity_processed.csv")
     args = parser.parse_args()
     main(args)
