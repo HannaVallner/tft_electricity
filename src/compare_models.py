@@ -265,10 +265,119 @@ def save_calibration_error_table(summary_df, output_path):
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(latex_table)
 
+def find_representative_shared_seed(seed_df):
+    """
+    Select one shared seed whose average Mean NQL across models is closest
+    to the overall average across seeds.
+    """
+    seed_means = seed_df.groupby("seed")["test_nql_mean"].mean()
+    overall_mean = seed_means.mean()
+    representative_seed = (seed_means - overall_mean).abs().idxmin()
+    return int(representative_seed)
+
+def save_representative_p50_comparison_plot(
+    representative_seed,
+    predictions_dir,
+    plots_dir,
+):
+    """
+    Plot target and p50 forecasts for all model variants using one
+    representative shared seed.
+    """
+    models = list(MODEL_REGISTRY.keys())
+
+    prediction_frames = {}
+
+    for model_name in models:
+        prediction_path = (
+            predictions_dir
+            / f"{model_name}_seed_{representative_seed}_predictions.csv"
+        )
+
+        if not prediction_path.exists():
+            print(f"Skipping representative p50 plot: missing {prediction_path}")
+            return None
+
+        prediction_frames[model_name] = pd.read_csv(prediction_path)
+
+    base_model = models[0]
+    base_df = prediction_frames[base_model]
+
+    if base_df.empty:
+        print("Skipping representative p50 plot: base prediction file is empty")
+        return None
+
+    selected_id = base_df["id"].iloc[0]
+    selected_origin = base_df["forecast_origin"].iloc[0]
+
+    base_window = (
+        base_df[
+            (base_df["id"] == selected_id)
+            & (base_df["forecast_origin"] == selected_origin)
+        ]
+        .sort_values("horizon")
+        .copy()
+    )
+
+    if base_window.empty:
+        print("Skipping representative p50 plot: selected forecast window is empty")
+        return None
+
+    start_date = pd.Timestamp("2011-01-01 00:00:00")
+    base_window["target_time_dt"] = (
+        start_date + pd.to_timedelta(base_window["target_time"], unit="h")
+    )
+
+    plt.figure(figsize=(10, 5))
+
+    plt.plot(
+        base_window["target_time_dt"],
+        base_window["target"].values,
+        marker="o",
+        linewidth=2.5,
+        label="Target",
+    )
+
+    merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
+
+    for model_name in models:
+        model_df = prediction_frames[model_name]
+
+        model_window = model_df.merge(
+            base_window[merge_keys + ["target_time_dt"]],
+            on=merge_keys,
+            how="inner",
+        ).sort_values("horizon")
+
+        if model_window.empty:
+            print(f"Skipping {model_name}: no matching representative forecast window")
+            continue
+
+        plt.plot(
+            model_window["target_time_dt"],
+            model_window["p50"].values,
+            marker="o",
+            linewidth=1.6,
+            label=model_name,
+        )
+
+    plt.title(f"Median forecast comparison for representative seed {representative_seed}")
+    plt.xlabel("Time")
+    plt.ylabel("Power usage (kW)")
+    plt.xticks(rotation=45)
+    plt.legend()
+    plt.tight_layout()
+
+    plot_path = plots_dir / f"representative_seed_{representative_seed}_p50_comparison.png"
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+
+    return plot_path
 
 def main(args):
     metrics_dir = Path(args.metrics_dir)
     plots_dir = Path(args.plots_dir)
+    predictions_dir = Path(args.predictions_dir)
 
     metrics_dir.mkdir(parents=True, exist_ok=True)
     plots_dir.mkdir(parents=True, exist_ok=True)
@@ -298,6 +407,8 @@ def main(args):
         raise ValueError("Metrics files do not contain 'test_nql_mean'.")
 
     seed_df = seed_df.sort_values(["model", "seed"]).reset_index(drop=True)
+    representative_seed = find_representative_shared_seed(seed_df)
+    print(f"Representative shared seed: {representative_seed}")
 
     seed_csv_path = metrics_dir / "model_comparison_by_seed.csv"
     seed_df.to_csv(seed_csv_path, index=False)
@@ -366,6 +477,15 @@ def main(args):
     reliability_plot_path = save_combined_reliability_plot(summary_df, plots_dir)
     print(f"Saved combined reliability plot to: {reliability_plot_path}")
 
+    p50_comparison_plot_path = save_representative_p50_comparison_plot(
+        representative_seed=representative_seed,
+        predictions_dir=predictions_dir,
+        plots_dir=plots_dir,
+    )
+
+    if p50_comparison_plot_path is not None:
+        print(f"Saved representative p50 comparison plot to: {p50_comparison_plot_path}")
+
     calibration_targets = {
         "observed_q10": 0.10,
         "observed_q50": 0.50,
@@ -396,5 +516,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--metrics_dir", type=str, default="outputs/metrics")
     parser.add_argument("--plots_dir", type=str, default="outputs/plots")
+    parser.add_argument("--predictions_dir", type=str, default="outputs/predictions")
     args = parser.parse_args()
     main(args)
