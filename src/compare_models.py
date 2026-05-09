@@ -9,8 +9,24 @@ from registry import MODEL_REGISTRY
 
 def format_mean_std(mean_value, std_value):
     if pd.isna(std_value):
-        return f"{mean_value:.6f}"
-    return f"{mean_value:.6f} $\\pm$ {std_value:.6f}"
+        return f"{mean_value:.4f}"
+    return f"{mean_value:.4f} $\\pm$ {std_value:.4f}"
+
+def metric_label(metric_name):
+    labels = {
+        "validation_loss": "Validation loss",
+        "test_nql_p10": "NQL at q=0.1",
+        "test_nql_p50": "NQL at q=0.5",
+        "test_nql_p90": "NQL at q=0.9",
+        "test_nql_mean": "Mean NQL",
+        "observed_q10": "Observed proportion at q=0.1",
+        "observed_q50": "Observed proportion at q=0.5",
+        "observed_q90": "Observed proportion at q=0.9",
+        "interval_80_coverage": "80% interval coverage",
+        "below_p10_rate": "Below p10 rate",
+        "above_p90_rate": "Above p90 rate",
+    }
+    return labels.get(metric_name, metric_name)
 
 def save_latex_table(summary_df, output_path):
     """
@@ -56,10 +72,29 @@ def save_latex_table(summary_df, output_path):
 
     latex_df = pd.DataFrame(rows)
 
-    if best_idx in latex_df.index:
-        for col in latex_df.columns:
-            latex_df.loc[best_idx, col] = f"\\textbf{{{latex_df.loc[best_idx, col]}}}"
+    best_model = summary_df.loc[summary_df["test_nql_mean_mean"].idxmin(), "model"]
 
+    latex_df = latex_df.rename(
+        columns={
+            "rank": "Rank",
+            "model": "Model",
+            "num_seeds": "Seeds",
+            "validation_loss": "Val. loss",
+            "test_nql_p10": "NQL$_{0.1}$",
+            "test_nql_p50": "NQL$_{0.5}$",
+            "test_nql_p90": "NQL$_{0.9}$",
+            "test_nql_mean": "Mean NQL",
+            "observed_q10": "Obs. Q$_{0.1}$",
+            "observed_q50": "Obs. Q$_{0.5}$",
+            "observed_q90": "Obs. Q$_{0.9}$",
+            "interval_80_coverage": "Cov$_{80}$",
+        }
+    )
+
+    best_row_idx = latex_df.index[latex_df["Model"] == best_model][0]
+    for col in latex_df.columns:
+        latex_df.loc[best_row_idx, col] = f"\\textbf{{{latex_df.loc[best_row_idx, col]}}}"
+    
     latex_table = latex_df.to_latex(
         index=False,
         caption="Comparison of TFT model variants on the electricity forecasting task across random seeds. Values are reported as mean $\\pm$ standard deviation.",
@@ -119,9 +154,9 @@ def save_metric_plot(summary_df, metric_name, plots_dir):
         yerr=summary_df[std_col] if std_col in summary_df.columns else None,
         capsize=4,
     )
-    plt.title(f"Model comparison: {metric_name}")
+    plt.title(f"Model comparison: {metric_label(metric_name)}")
     plt.xlabel("Model")
-    plt.ylabel(metric_name)
+    plt.ylabel(metric_label(metric_name))
     plt.xticks(rotation=30)
     plt.tight_layout()
 
@@ -148,9 +183,9 @@ def save_calibration_comparison_plot(summary_df, metric_name, expected_value, pl
         capsize=4,
     )
     plt.axhline(expected_value, linestyle="--", label=f"expected = {expected_value:.2f}")
-    plt.title(f"Calibration comparison: {metric_name}")
+    plt.title(f"Calibration comparison: {metric_label(metric_name)}")
     plt.xlabel("Model")
-    plt.ylabel(metric_name)
+    plt.ylabel(metric_label(metric_name))
     plt.xticks(rotation=30)
     plt.legend()
     plt.tight_layout()
@@ -159,6 +194,77 @@ def save_calibration_comparison_plot(summary_df, metric_name, expected_value, pl
     plt.savefig(plot_path, dpi=150)
     plt.close()
     return plot_path
+
+def save_combined_reliability_plot(summary_df, plots_dir):
+    nominal = [0.1, 0.5, 0.9]
+
+    plt.figure(figsize=(6, 6))
+    plt.plot([0, 1], [0, 1], linestyle="--", label="Ideal")
+
+    for _, row in summary_df.iterrows():
+        observed = [
+            row["observed_q10_mean"],
+            row["observed_q50_mean"],
+            row["observed_q90_mean"],
+        ]
+        plt.plot(nominal, observed, marker="o", label=row["model"])
+
+    plt.xlim(0, 1)
+    plt.ylim(0, 1)
+    plt.xlabel("Nominal quantile")
+    plt.ylabel("Observed proportion")
+    plt.title("Quantile reliability across model variants")
+    plt.legend()
+    plt.tight_layout()
+
+    plot_path = plots_dir / "combined_reliability_diagram_mean.png"
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+    return plot_path
+
+def save_calibration_error_table(summary_df, output_path):
+    """
+    Save a compact LaTeX table showing calibration error.
+    Lower values indicate better calibration.
+    """
+
+    table_df = summary_df[
+        [
+            "model",
+            "test_nql_mean_mean",
+            "q10_abs_error_mean",
+            "q50_abs_error_mean",
+            "q90_abs_error_mean",
+            "cov80_abs_error_mean",
+        ]
+    ].copy()
+
+    table_df = table_df.rename(
+        columns={
+            "model": "Model",
+            "test_nql_mean_mean": "Mean NQL",
+            "q10_abs_error_mean": "Q10 error",
+            "q50_abs_error_mean": "Q50 error",
+            "q90_abs_error_mean": "Q90 error",
+            "cov80_abs_error_mean": "Cov80 error",
+        }
+    )
+
+    numeric_cols = ["Mean NQL", "Q10 error", "Q50 error", "Q90 error", "Cov80 error"]
+
+    for col in numeric_cols:
+        table_df[col] = table_df[col].map(lambda x: f"{x:.4f}")
+
+    latex_table = table_df.to_latex(
+        index=False,
+        caption="Calibration error summary across model variants. Lower values indicate closer agreement with the nominal quantile or interval coverage.",
+        label="tab:calibration_error_summary",
+        escape=False,
+    )
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(latex_table)
+
 
 def main(args):
     metrics_dir = Path(args.metrics_dir)
@@ -223,6 +329,11 @@ def main(args):
     summary_df = summary_df.sort_values("test_nql_mean_mean").reset_index(drop=True)
     summary_df["rank"] = range(1, len(summary_df) + 1)
 
+    summary_df["q10_abs_error_mean"] = (summary_df["observed_q10_mean"] - 0.10).abs()
+    summary_df["q50_abs_error_mean"] = (summary_df["observed_q50_mean"] - 0.50).abs()
+    summary_df["q90_abs_error_mean"] = (summary_df["observed_q90_mean"] - 0.90).abs()
+    summary_df["cov80_abs_error_mean"] = (summary_df["interval_80_coverage_mean"] - 0.80).abs()
+
     summary_csv_path = metrics_dir / "model_comparison_summary_mean_std.csv"
     summary_df.to_csv(summary_csv_path, index=False)
     print(f"Saved summary comparison table to: {summary_csv_path}")
@@ -230,6 +341,10 @@ def main(args):
     comparison_tex_path = metrics_dir / "model_comparison_summary_mean_std.tex"
     save_latex_table(summary_df, comparison_tex_path)
     print(f"Saved LaTeX table to: {comparison_tex_path}")
+
+    calibration_error_tex_path = metrics_dir / "calibration_error_summary.tex"
+    save_calibration_error_table(summary_df, calibration_error_tex_path)
+    print(f"Saved calibration error table to: {calibration_error_tex_path}")
 
     metric_columns = [
         "validation_loss",
@@ -247,6 +362,9 @@ def main(args):
     summary_plot_path = save_summary_plot(summary_df, plots_dir)
     if summary_plot_path is not None:
         print(f"Saved summary plot to: {summary_plot_path}")
+
+    reliability_plot_path = save_combined_reliability_plot(summary_df, plots_dir)
+    print(f"Saved combined reliability plot to: {reliability_plot_path}")
 
     calibration_targets = {
         "observed_q10": 0.10,
