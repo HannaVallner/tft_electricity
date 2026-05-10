@@ -4,6 +4,7 @@ import importlib
 import json
 
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 import torch
@@ -184,12 +185,18 @@ def make_forecast_window_plot(merged_df, model_name, plots_dir):
         alpha=0.25,
         label="p10-p90",
     )
-    plt.title(f"{model_name}: example 24-hour forecast window")
-    plt.xlabel("Time")
+    forecast_date = plot_df["target_time_dt"].iloc[0].strftime("%d-%m-%Y")
+
+    plt.title(f"{model_name}: example 24-hour forecast window ({forecast_date})")
+    plt.xlabel("Hour")
     plt.ylabel("Power usage (kW)")
-    plt.xticks(x)
-    plt.xticks(rotation=45)
-    plt.legend()
+
+    ax = plt.gca()
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    ax.xaxis.set_major_locator(mdates.HourLocator(interval=3))
+
+    plt.xticks(rotation=0)
+    plt.legend(loc="best")
     plt.tight_layout()
 
     plot_path = plots_dir / f"{model_name}_forecast_window_plot.pdf"

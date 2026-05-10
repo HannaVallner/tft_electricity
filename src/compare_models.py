@@ -335,9 +335,28 @@ def save_representative_p50_comparison_plot(
         print("Skipping p50 comparison plot: merged base dataframe is empty")
         return None
 
-    first_row = base_merged.iloc[0]
-    selected_id = first_row["id"]
-    selected_origin = first_row["forecast_origin"]
+    base_merged["abs_p50_error"] = (
+    base_merged["target"] - base_merged["p50"]
+    ).abs()
+
+    window_errors = (
+        base_merged
+        .groupby(["id", "forecast_origin"])["abs_p50_error"]
+        .mean()
+        .reset_index(name="window_mae")
+    )
+
+    median_error = window_errors["window_mae"].median()
+
+    selected_window = (
+        window_errors
+        .assign(distance_to_median=(window_errors["window_mae"] - median_error).abs())
+        .sort_values("distance_to_median")
+        .iloc[0]
+    )
+
+    selected_id = selected_window["id"]
+    selected_origin = selected_window["forecast_origin"]
 
     base_window = (
         base_merged[
