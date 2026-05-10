@@ -113,10 +113,31 @@ def evaluate_validation_loss(model, dataloader, loss_fn, device):
 def make_plot(merged_df, model_name, plots_dir):
     plots_dir.mkdir(parents=True, exist_ok=True)
 
-    first_id = merged_df["id"].iloc[0]
     first_horizon = 1
+    horizon_df = merged_df[merged_df["horizon"] == first_horizon].copy()
+
+    horizon_df["abs_p50_error"] = (
+        horizon_df["target"] - horizon_df["p50"]
+    ).abs()
+
+    id_errors = (
+        horizon_df
+        .groupby("id")["abs_p50_error"]
+        .mean()
+        .reset_index(name="id_mae")
+    )
+
+    median_error = id_errors["id_mae"].median()
+
+    selected_id = (
+        id_errors
+        .assign(distance_to_median=(id_errors["id_mae"] - median_error).abs())
+        .sort_values("distance_to_median")
+        .iloc[0]["id"]
+    )
+
     plot_df = (
-        merged_df[(merged_df["id"] == first_id) & (merged_df["horizon"] == first_horizon)]
+        horizon_df[horizon_df["id"] == selected_id]
         .sort_values("target_time")
         .head(200)
     )
@@ -135,10 +156,15 @@ def make_plot(merged_df, model_name, plots_dir):
         alpha=0.25,
         label="p10-p90",
     )
-    plt.title(f"{model_name}: first series, horizon 1")
-    plt.xlabel("Time")
+    plt.title(f"{model_name}: representative one-step-ahead forecast")    
+    plt.xlabel("Date")
     plt.ylabel("Power usage (kW)")
-    plt.xticks(rotation=45)
+
+    ax = plt.gca()
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m %H:%M"))
+    ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+
+    plt.xticks(rotation=45, ha="right")
     plt.legend()
     plt.tight_layout()
 
@@ -156,10 +182,32 @@ def make_forecast_window_plot(merged_df, model_name, plots_dir):
     """
     plots_dir.mkdir(parents=True, exist_ok=True)
 
-    # Pick first available forecast window
-    first_row = merged_df.iloc[0]
-    selected_id = first_row["id"]
-    selected_origin = first_row["forecast_origin"]
+    merged_df = merged_df.copy()
+
+    merged_df["abs_p50_error"] = (
+        merged_df["target"] - merged_df["p50"]
+    ).abs()
+
+    window_errors = (
+        merged_df
+        .groupby(["id", "forecast_origin"])["abs_p50_error"]
+        .mean()
+        .reset_index(name="window_mae")
+    )
+
+    median_error = window_errors["window_mae"].median()
+
+    selected_window = (
+        window_errors
+        .assign(
+            distance_to_median=(window_errors["window_mae"] - median_error).abs()
+        )
+        .sort_values("distance_to_median")
+        .iloc[0]
+    )
+
+    selected_id = selected_window["id"]
+    selected_origin = selected_window["forecast_origin"]
 
     plot_df = (
         merged_df[
@@ -187,7 +235,7 @@ def make_forecast_window_plot(merged_df, model_name, plots_dir):
     )
     forecast_date = plot_df["target_time_dt"].iloc[0].strftime("%d-%m-%Y")
 
-    plt.title(f"{model_name}: example 24-hour forecast window ({forecast_date})")
+    plt.title(f"{model_name}: 24-hour forecast window ({forecast_date})")    
     plt.xlabel("Hour")
     plt.ylabel("Power usage (kW)")
 
