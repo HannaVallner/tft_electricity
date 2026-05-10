@@ -57,7 +57,6 @@ def save_latex_table(summary_df, output_path):
         formatted_row = {
             "rank": int(row["rank"]),
             "model": row["model"],
-            "num_seeds": int(row["num_seeds"]),
         }
 
         for metric in metrics:
@@ -80,7 +79,6 @@ def save_latex_table(summary_df, output_path):
         columns={
             "rank": "Rank",
             "model": "Model",
-            "num_seeds": "Seeds",
             "validation_loss": "Val. loss",
             "test_nql_p10": "NQL$_{0.1}$",
             "test_nql_p50": "NQL$_{0.5}$",
@@ -99,7 +97,7 @@ def save_latex_table(summary_df, output_path):
     
     latex_table = latex_df.to_latex(
         index=False,
-        caption="Comparison of TFT model variants on the electricity forecasting task across random seeds. Values are reported as mean $\\pm$ standard deviation.",
+        caption="Comparison of TFT model variants across random seeds.",
         label="tab:model_comparison_seeds",
         bold_rows=False,
         escape=False,
@@ -134,8 +132,8 @@ def save_summary_plot(summary_df, plots_dir):
     plt.xticks(rotation=30)
     plt.tight_layout()
 
-    plot_path = plots_dir / "compare_summary_mean_nql_with_std.png"
-    plt.savefig(plot_path, dpi=150)
+    plot_path = plots_dir / "compare_summary_mean_nql_with_std.pdf"
+    plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
     return plot_path
 
@@ -162,8 +160,8 @@ def save_metric_plot(summary_df, metric_name, plots_dir):
     plt.xticks(rotation=30)
     plt.tight_layout()
 
-    plot_path = plots_dir / f"compare_{metric_name}_mean_std.png"
-    plt.savefig(plot_path, dpi=150)
+    plot_path = plots_dir / f"compare_{metric_name}_mean_std.pdf"
+    plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
     return plot_path
 
@@ -218,8 +216,8 @@ def save_calibration_comparison_plot(summary_df, metric_name, expected_value, pl
     plt.legend()
     plt.tight_layout()
 
-    plot_path = plots_dir / f"compare_{metric_name}_calibration_mean_std.png"
-    plt.savefig(plot_path, dpi=150)
+    plot_path = plots_dir / f"compare_{metric_name}_calibration_mean_std.pdf"
+    plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
     return plot_path
 
@@ -245,8 +243,8 @@ def save_combined_reliability_plot(summary_df, plots_dir):
     plt.legend()
     plt.tight_layout()
 
-    plot_path = plots_dir / "combined_reliability_diagram_mean.png"
-    plt.savefig(plot_path, dpi=150)
+    plot_path = plots_dir / "combined_reliability_diagram_mean.pdf"
+    plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
     return plot_path
 
@@ -259,7 +257,6 @@ def save_calibration_error_table(summary_df, output_path):
     table_df = summary_df[
         [
             "model",
-            "test_nql_mean_mean",
             "q10_abs_error_mean",
             "q50_abs_error_mean",
             "q90_abs_error_mean",
@@ -270,7 +267,6 @@ def save_calibration_error_table(summary_df, output_path):
     table_df = table_df.rename(
         columns={
             "model": "Model",
-            "test_nql_mean_mean": "Mean NQL",
             "q10_abs_error_mean": "Q10 error",
             "q50_abs_error_mean": "Q50 error",
             "q90_abs_error_mean": "Q90 error",
@@ -285,7 +281,7 @@ def save_calibration_error_table(summary_df, output_path):
 
     latex_table = table_df.to_latex(
         index=False,
-        caption="Calibration error summary across model variants. Lower values indicate closer agreement with the nominal quantile or interval coverage.",
+        caption="Calibration error summary across model variants.",
         label="tab:calibration_error_summary",
         escape=False,
     )
@@ -403,8 +399,8 @@ def save_representative_p50_comparison_plot(
     plt.legend()
     plt.tight_layout()
 
-    plot_path = plots_dir / f"representative_seed_{representative_seed}_p50_comparison.png"
-    plt.savefig(plot_path, dpi=150)
+    plot_path = plots_dir / f"representative_seed_{representative_seed}_p50_comparison.pdf"
+    plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
 
     return plot_path

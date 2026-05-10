@@ -145,8 +145,8 @@ def make_plot(merged_df, model_name, plots_dir):
     plt.legend()
     plt.tight_layout()
 
-    plot_path = plots_dir / f"{model_name}_forecast_plot.png"
-    plt.savefig(plot_path, dpi=150)
+    plot_path = plots_dir / f"{model_name}_forecast_plot.pdf"
+    plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
     return plot_path
 
@@ -196,8 +196,8 @@ def make_forecast_window_plot(merged_df, model_name, plots_dir):
     plt.legend()
     plt.tight_layout()
 
-    plot_path = plots_dir / f"{model_name}_forecast_window_plot.png"
-    plt.savefig(plot_path, dpi=150)
+    plot_path = plots_dir / f"{model_name}_forecast_window_plot.pdf"
+    plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
     return plot_path
 
@@ -225,8 +225,8 @@ def make_reliability_plot(merged_df, model_name, plots_dir):
     plt.legend()
     plt.tight_layout()
 
-    plot_path = plots_dir / f"{model_name}_reliability_plot.png"
-    plt.savefig(plot_path, dpi=150)
+    plot_path = plots_dir / f"{model_name}_reliability_plot.pdf"
+    plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
     return plot_path
 
@@ -260,8 +260,8 @@ def make_interval_calibration_plot(merged_df, model_name, plots_dir):
     plt.legend()
     plt.tight_layout()
 
-    plot_path = plots_dir / f"{model_name}_interval_calibration_plot.png"
-    plt.savefig(plot_path, dpi=150)
+    plot_path = plots_dir / f"{model_name}_interval_calibration_plot.pdf"
+    plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
     return plot_path
 
