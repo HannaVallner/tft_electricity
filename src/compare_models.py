@@ -353,7 +353,7 @@ def save_representative_p50_comparison_plot(
         start_date + pd.to_timedelta(base_window["target_time"], unit="h")
     )
 
-    plt.figure(figsize=(14, 5))
+    plt.figure(figsize=(10, 5))
 
     plt.plot(
         base_window["target_time_dt"],
@@ -386,14 +386,14 @@ def save_representative_p50_comparison_plot(
             start_date + pd.to_timedelta(model_window["target_time"], unit="h")
         )
 
-    plt.plot(
-        model_window["target_time_dt"],
-        model_window["p50"].values,
-        marker="o",
-        linewidth=1.6,
-        alpha=0.85,
-        label=model_name,
-    )
+        plt.plot(
+            model_window["target_time_dt"],
+            model_window["p50"].values,
+            marker="o",
+            linewidth=1.6,
+            alpha=0.85,
+            label=model_name,
+        )
 
     plt.title(f"Median forecast comparison for representative seed {representative_seed}")
     plt.xlabel("Time")

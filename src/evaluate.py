@@ -124,7 +124,7 @@ def make_plot(merged_df, model_name, plots_dir):
         return None
 
     x = plot_df["target_time_dt"]
-    plt.figure(figsize=(12, 5))
+    plt.figure(figsize=(10, 5))
     plt.plot(x, plot_df["target"].values, label="target")
     plt.plot(x, plot_df["p50"].values, label="p50")
     plt.fill_between(
