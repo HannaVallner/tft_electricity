@@ -52,16 +52,12 @@ def compute_quantile_calibration_metrics(merged_df):
     observed_q90 = float(np.mean(target <= p90))
 
     interval_80_coverage = float(np.mean((target >= p10) & (target <= p90)))
-    below_p10_rate = float(np.mean(target < p10))
-    above_p90_rate = float(np.mean(target > p90))
 
     return {
         "observed_q10": observed_q10,
         "observed_q50": observed_q50,
         "observed_q90": observed_q90,
         "interval_80_coverage": interval_80_coverage,
-        "below_p10_rate": below_p10_rate,
-        "above_p90_rate": above_p90_rate,
     }
 
 def build_targets_dataframe(test_dataset, formatter):

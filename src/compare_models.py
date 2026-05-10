@@ -3,11 +3,13 @@ import argparse
 import json
 
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import pandas as pd
 
 from registry import MODEL_REGISTRY
 from data_formatter import ElectricityFormatter
 from dataset import TFTDataset
+
 
 def format_mean_std(mean_value, std_value):
     if pd.isna(std_value):
@@ -25,8 +27,6 @@ def metric_label(metric_name):
         "observed_q50": "Observed proportion at q=0.5",
         "observed_q90": "Observed proportion at q=0.9",
         "interval_80_coverage": "80% interval coverage",
-        "below_p10_rate": "Below p10 rate",
-        "above_p90_rate": "Above p90 rate",
     }
     return labels.get(metric_name, metric_name)
 
@@ -47,8 +47,6 @@ def save_latex_table(summary_df, output_path):
         "observed_q50",
         "observed_q90",
         "interval_80_coverage",
-        "below_p10_rate",
-        "above_p90_rate",
     ]
 
     best_idx = summary_df["test_nql_mean_mean"].idxmin()
@@ -91,6 +89,7 @@ def save_latex_table(summary_df, output_path):
         }
     )
 
+    latex_df = latex_df.astype(str)
     best_row_idx = latex_df.index[latex_df["Model"] == best_model][0]
     for col in latex_df.columns:
         latex_df.loc[best_row_idx, col] = f"\\textbf{{{latex_df.loc[best_row_idx, col]}}}"
@@ -274,7 +273,7 @@ def save_calibration_error_table(summary_df, output_path):
         }
     )
 
-    numeric_cols = ["Mean NQL", "Q10 error", "Q50 error", "Q90 error", "Cov80 error"]
+    numeric_cols = ["Q10 error", "Q50 error", "Q90 error", "Cov80 error"]
 
     for col in numeric_cols:
         table_df[col] = table_df[col].map(lambda x: f"{x:.4f}")
@@ -354,14 +353,17 @@ def save_representative_p50_comparison_plot(
         start_date + pd.to_timedelta(base_window["target_time"], unit="h")
     )
 
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(14, 5))
 
     plt.plot(
         base_window["target_time_dt"],
         base_window["target"].values,
+        color="black",
         marker="o",
-        linewidth=2.5,
+        linewidth=3.2,
+        markersize=6,
         label="target",
+        zorder=10,
     )
 
     for model_name in models:
@@ -384,18 +386,24 @@ def save_representative_p50_comparison_plot(
             start_date + pd.to_timedelta(model_window["target_time"], unit="h")
         )
 
-        plt.plot(
-            model_window["target_time_dt"],
-            model_window["p50"].values,
-            marker="o",
-            linewidth=1.6,
-            label=model_name,
-        )
+    plt.plot(
+        model_window["target_time_dt"],
+        model_window["p50"].values,
+        marker="o",
+        linewidth=1.6,
+        alpha=0.85,
+        label=model_name,
+    )
 
     plt.title(f"Median forecast comparison for representative seed {representative_seed}")
     plt.xlabel("Time")
     plt.ylabel("Power usage (kW)")
-    plt.xticks(rotation=45)
+    ax = plt.gca()
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m-%Y %H:%M"))
+    ax.xaxis.set_major_locator(mdates.HourLocator(interval=3))
+
+    plt.xticks(rotation=45, ha="right")
+    plt.legend(loc="lower left")
     plt.legend()
     plt.tight_layout()
 
@@ -523,8 +531,6 @@ def main(args):
         "observed_q50": 0.50,
         "observed_q90": 0.90,
         "interval_80_coverage": 0.80,
-        "below_p10_rate": 0.10,
-        "above_p90_rate": 0.10,
     }
 
     for metric_name, expected_value in calibration_targets.items():
