@@ -395,7 +395,7 @@ def save_representative_p50_comparison_plot(
             label=model_name,
         )
 
-    plt.title(f"Median forecast comparison for representative seed {representative_seed}")
+    plt.title(f"Median forecast comparison for seed {representative_seed}")
     plt.xlabel("Time")
     plt.ylabel("Power usage (kW)")
     ax = plt.gca()
@@ -404,7 +404,6 @@ def save_representative_p50_comparison_plot(
 
     plt.xticks(rotation=45, ha="right")
     plt.legend(loc="lower left")
-    plt.legend()
     plt.tight_layout()
 
     plot_path = plots_dir / f"representative_seed_{representative_seed}_p50_comparison.pdf"
