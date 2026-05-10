@@ -335,22 +335,56 @@ def save_representative_p50_comparison_plot(
         print("Skipping p50 comparison plot: merged base dataframe is empty")
         return None
 
-    base_merged["abs_p50_error"] = (
-    base_merged["target"] - base_merged["p50"]
-    ).abs()
+    window_error_frames = []
 
-    window_errors = (
-        base_merged
-        .groupby(["id", "forecast_origin"])["abs_p50_error"]
-        .mean()
-        .reset_index(name="window_mae")
+    for model_name in models:
+        model_merged = prediction_frames[model_name].merge(
+            targets_df,
+            on=merge_keys,
+            how="inner",
+        )
+
+        model_merged["abs_p50_error"] = (
+            model_merged["target"] - model_merged["p50"]
+        ).abs()
+
+        model_window_errors = (
+            model_merged
+            .groupby(["id", "forecast_origin"])["abs_p50_error"]
+            .mean()
+            .reset_index(name=f"{model_name}_mae")
+        )
+
+        window_error_frames.append(model_window_errors)
+
+    combined_window_errors = window_error_frames[0]
+
+    for df in window_error_frames[1:]:
+        combined_window_errors = combined_window_errors.merge(
+            df,
+            on=["id", "forecast_origin"],
+            how="inner",
+        )
+
+    mae_columns = [
+        col for col in combined_window_errors.columns
+        if col.endswith("_mae")
+    ]
+
+    combined_window_errors["mean_window_mae"] = (
+        combined_window_errors[mae_columns]
+        .mean(axis=1)
     )
 
-    median_error = window_errors["window_mae"].median()
+    median_error = combined_window_errors["mean_window_mae"].median()
 
     selected_window = (
-        window_errors
-        .assign(distance_to_median=(window_errors["window_mae"] - median_error).abs())
+        combined_window_errors
+        .assign(
+            distance_to_median=(
+                combined_window_errors["mean_window_mae"] - median_error
+            ).abs()
+        )
         .sort_values("distance_to_median")
         .iloc[0]
     )
