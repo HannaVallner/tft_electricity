@@ -355,12 +355,16 @@ def main(args):
     if not predictions_path.exists():
         raise FileNotFoundError(f"Predictions file not found: {predictions_path}")
 
-    predictions_df = pd.read_csv(predictions_path)
+    predictions_df = pd.read_csv(predictions_path, on_bad_lines="skip")
     targets_df = build_targets_dataframe(test_dataset, formatter)
 
     merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
-    merged_df = predictions_df.merge(targets_df, on=merge_keys, how="inner")
 
+    for col in merge_keys:
+        predictions_df[col] = predictions_df[col].astype(int)
+        targets_df[col] = targets_df[col].astype(int)
+
+    merged_df = predictions_df.merge(targets_df, on=merge_keys, how="inner")
     start_date = pd.Timestamp("2011-01-01 00:00:00")
 
     merged_df["forecast_origin_dt"] = (

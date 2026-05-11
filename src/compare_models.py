@@ -284,40 +284,6 @@ def save_combined_reliability_plot(summary_df, plots_dir):
     plt.close()
     return plot_path
 
-    table_df = summary_df[
-        [
-            "model",
-            "q10_abs_error_mean",
-            "q50_abs_error_mean",
-            "q90_abs_error_mean",
-            "cov80_abs_error_mean",
-        ]
-    ].copy()
-
-    table_df = table_df.rename(
-        columns={
-            "model": "Model",
-            "q10_abs_error_mean": "Q10 error",
-            "q50_abs_error_mean": "Q50 error",
-            "q90_abs_error_mean": "Q90 error",
-            "cov80_abs_error_mean": "Cov80 error",
-        }
-    )
-
-    numeric_cols = ["Q10 error", "Q50 error", "Q90 error", "Cov80 error"]
-
-    for col in numeric_cols:
-        table_df[col] = table_df[col].map(lambda x: f"{x:.4f}")
-
-    latex_table = table_df.to_latex(
-        index=False,
-        caption="Calibration error summary across model variants.",
-        label="tab:calibration_error_summary",
-        escape=False,
-    )
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(latex_table)
 
 def find_representative_shared_seed(seed_df):
     """
@@ -352,10 +318,20 @@ def save_representative_p50_comparison_plot(
             print(f"Skipping p50 comparison plot: missing {prediction_path}")
             return None
 
-        prediction_frames[model_name] = pd.read_csv(prediction_path)
+        prediction_frames[model_name] = pd.read_csv(
+            prediction_path,
+            on_bad_lines="skip",
+        )   
 
     merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
 
+    for col in merge_keys:
+        targets_df[col] = targets_df[col].astype(int)
+
+    for model_name in models:
+        for col in merge_keys:
+            prediction_frames[model_name][col] = prediction_frames[model_name][col].astype(int)
+    
     base_merged = prediction_frames[models[0]].merge(
         targets_df,
         on=merge_keys,
