@@ -30,111 +30,148 @@ def metric_label(metric_name):
     }
     return labels.get(metric_name, metric_name)
 
-def save_latex_table(summary_df, output_path):
+
+def save_calibration_table(summary_df, output_path):
     """
-    Save a LaTeX table with mean ± std across seeds.
+    Save a LaTeX table with observed quantile calibration and
+    80% interval coverage values as mean ± std across seeds.
     """
+
+    table_df = summary_df[
+        [
+            "model",
+            "observed_q10_mean",
+            "observed_q10_std",
+            "observed_q50_mean",
+            "observed_q50_std",
+            "observed_q90_mean",
+            "observed_q90_std",
+            "interval_80_coverage_mean",
+            "interval_80_coverage_std",
+        ]
+    ].copy()
 
     rows = []
 
-    metrics = [
-        "validation_loss",
-        "test_nql_p10",
-        "test_nql_p50",
-        "test_nql_p90",
-        "test_nql_mean",
-        "observed_q10",
-        "observed_q50",
-        "observed_q90",
-        "interval_80_coverage",
-    ]
-
-    best_idx = summary_df["test_nql_mean_mean"].idxmin()
-
-    for idx, row in summary_df.iterrows():
-        formatted_row = {
-            "rank": int(row["rank"]),
-            "model": row["model"],
-        }
-
-        for metric in metrics:
-            mean_col = f"{metric}_mean"
-            std_col = f"{metric}_std"
-
-            if mean_col in summary_df.columns:
-                formatted_row[metric] = format_mean_std(
-                    row[mean_col],
-                    row[std_col] if std_col in summary_df.columns else float("nan"),
-                )
-
-        rows.append(formatted_row)
+    for _, row in table_df.iterrows():
+        rows.append(
+            {
+                "Model": row["model"],
+                "Obs. Q$_{0.1}$": format_mean_std(
+                    row["observed_q10_mean"],
+                    row["observed_q10_std"],
+                ),
+                "Obs. Q$_{0.5}$": format_mean_std(
+                    row["observed_q50_mean"],
+                    row["observed_q50_std"],
+                ),
+                "Obs. Q$_{0.9}$": format_mean_std(
+                    row["observed_q90_mean"],
+                    row["observed_q90_std"],
+                ),
+                "Cov$_{80}$": format_mean_std(
+                    row["interval_80_coverage_mean"],
+                    row["interval_80_coverage_std"],
+                ),
+            }
+        )
 
     latex_df = pd.DataFrame(rows)
 
-    best_model = summary_df.loc[summary_df["test_nql_mean_mean"].idxmin(), "model"]
-
-    latex_df = latex_df.rename(
-        columns={
-            "rank": "Rank",
-            "model": "Model",
-            "validation_loss": "Val. loss",
-            "test_nql_p10": "NQL$_{0.1}$",
-            "test_nql_p50": "NQL$_{0.5}$",
-            "test_nql_p90": "NQL$_{0.9}$",
-            "test_nql_mean": "Mean NQL",
-            "observed_q10": "Obs. Q$_{0.1}$",
-            "observed_q50": "Obs. Q$_{0.5}$",
-            "observed_q90": "Obs. Q$_{0.9}$",
-            "interval_80_coverage": "Cov$_{80}$",
-        }
-    )
-
-    latex_df = latex_df.astype(str)
-    best_row_idx = latex_df.index[latex_df["Model"] == best_model][0]
-    for col in latex_df.columns:
-        latex_df.loc[best_row_idx, col] = f"\\textbf{{{latex_df.loc[best_row_idx, col]}}}"
-    
     latex_table = latex_df.to_latex(
         index=False,
-        caption="Comparison of TFT model variants across random seeds.",
-        label="tab:model_comparison_seeds",
-        bold_rows=False,
+        caption="Quantile calibration and interval coverage metrics for TFT model variants across random seeds.",
+        label="tab:calibration_summary",
         escape=False,
+    )
+
+    latex_table = latex_table.replace(
+        "\\begin{table}",
+        "\\begin{table}[H]"
+    )
+
+    latex_table = latex_table.replace(
+        "\\begin{tabular}{lllll}",
+        "\\resizebox{\\textwidth}{!}{%\n\\begin{tabular}{lcccc}"
+    )
+
+    latex_table = latex_table.replace(
+        "\\end{tabular}",
+        "\\end{tabular}%\n}"
     )
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(latex_table)
 
-
-
-def save_summary_plot(summary_df, plots_dir):
+def save_latex_table(summary_df, output_path):
     """
-    Save summary plot using mean test NQL with std error bars.
+    Save a LaTeX table with forecasting performance metrics
+    as mean ± std across seeds.
     """
-    metric_name = "test_nql_mean"
-    mean_col = f"{metric_name}_mean"
-    std_col = f"{metric_name}_std"
 
-    if mean_col not in summary_df.columns:
-        return None
+    rows = []
 
-    plt.figure(figsize=(10, 5))
-    plt.bar(
-        summary_df["model"],
-        summary_df[mean_col],
-        yerr=summary_df[std_col] if std_col in summary_df.columns else None,
-        capsize=4,
+    best_model = summary_df.loc[
+        summary_df["test_nql_mean_mean"].idxmin(),
+        "model"
+    ]
+
+    for _, row in summary_df.iterrows():
+        formatted_row = {
+            "Model": row["model"],
+            "Mean NQL": format_mean_std(
+                row["test_nql_mean_mean"],
+                row["test_nql_mean_std"],
+            ),
+            "NQL$_{0.1}$": format_mean_std(
+                row["test_nql_p10_mean"],
+                row["test_nql_p10_std"],
+            ),
+            "NQL$_{0.5}$": format_mean_std(
+                row["test_nql_p50_mean"],
+                row["test_nql_p50_std"],
+            ),
+            "NQL$_{0.9}$": format_mean_std(
+                row["test_nql_p90_mean"],
+                row["test_nql_p90_std"],
+            ),
+        }
+
+        rows.append(formatted_row)
+
+    latex_df = pd.DataFrame(rows).astype(str)
+
+    best_row_idx = latex_df.index[latex_df["Model"] == best_model][0]
+
+    for col in latex_df.columns:
+        latex_df.loc[best_row_idx, col] = (
+            f"\\textbf{{{latex_df.loc[best_row_idx, col]}}}"
+        )
+
+    latex_table = latex_df.to_latex(
+        index=False,
+        caption="Forecasting performance of TFT model variants across random seeds.",
+        label="tab:model_comparison",
+        escape=False,
     )
-    plt.title("Overall model comparison by mean test normalized quantile loss")
-    plt.xlabel("Model")
-    plt.ylabel("Mean test NQL")
-    plt.xticks(rotation=30)
-    plt.tight_layout()
 
-    plot_path = plots_dir / "compare_summary_mean_nql_with_std.pdf"
-    plt.savefig(plot_path, bbox_inches="tight")
-    plt.close()
-    return plot_path
+    latex_table = latex_table.replace(
+        "\\begin{table}",
+        "\\begin{table}[H]"
+    )
+
+    latex_table = latex_table.replace(
+        "\\begin{tabular}{lllll}",
+        "\\resizebox{\\textwidth}{!}{%\n\\begin{tabular}{lcccc}"
+    )
+
+    latex_table = latex_table.replace(
+        "\\end{tabular}",
+        "\\end{tabular}%\n}"
+    )
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(latex_table)
 
 def save_metric_plot(summary_df, metric_name, plots_dir):
     """
@@ -246,12 +283,6 @@ def save_combined_reliability_plot(summary_df, plots_dir):
     plt.savefig(plot_path, bbox_inches="tight")
     plt.close()
     return plot_path
-
-def save_calibration_error_table(summary_df, output_path):
-    """
-    Save a compact LaTeX table showing calibration error.
-    Lower values indicate better calibration.
-    """
 
     table_df = summary_df[
         [
@@ -531,11 +562,6 @@ def main(args):
     summary_df = summary_df.sort_values("test_nql_mean_mean").reset_index(drop=True)
     summary_df["rank"] = range(1, len(summary_df) + 1)
 
-    summary_df["q10_abs_error_mean"] = (summary_df["observed_q10_mean"] - 0.10).abs()
-    summary_df["q50_abs_error_mean"] = (summary_df["observed_q50_mean"] - 0.50).abs()
-    summary_df["q90_abs_error_mean"] = (summary_df["observed_q90_mean"] - 0.90).abs()
-    summary_df["cov80_abs_error_mean"] = (summary_df["interval_80_coverage_mean"] - 0.80).abs()
-
     summary_csv_path = metrics_dir / "model_comparison_summary_mean_std.csv"
     summary_df.to_csv(summary_csv_path, index=False)
     print(f"Saved summary comparison table to: {summary_csv_path}")
@@ -544,9 +570,10 @@ def main(args):
     save_latex_table(summary_df, comparison_tex_path)
     print(f"Saved LaTeX table to: {comparison_tex_path}")
 
-    calibration_error_tex_path = metrics_dir / "calibration_error_summary.tex"
-    save_calibration_error_table(summary_df, calibration_error_tex_path)
-    print(f"Saved calibration error table to: {calibration_error_tex_path}")
+    calibration_tex_path = metrics_dir / "calibration_summary.tex"
+    save_calibration_table(summary_df, calibration_tex_path)
+    print(f"Saved calibration table to: {calibration_tex_path}")
+
 
     metric_columns = [
         "validation_loss",
@@ -560,10 +587,6 @@ def main(args):
         plot_path = save_metric_plot(summary_df, metric_name, plots_dir)
         if plot_path is not None:
             print(f"Saved plot to: {plot_path}")
-
-    summary_plot_path = save_summary_plot(summary_df, plots_dir)
-    if summary_plot_path is not None:
-        print(f"Saved summary plot to: {summary_plot_path}")
 
     reliability_plot_path = save_combined_reliability_plot(summary_df, plots_dir)
     print(f"Saved combined reliability plot to: {reliability_plot_path}")

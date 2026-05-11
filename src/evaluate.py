@@ -159,9 +159,9 @@ def make_plot(merged_df, model_name, plots_dir):
     plt.title(f"{model_name}: representative one-step-ahead forecast")    
     plt.xlabel("Date")
     plt.ylabel("Power usage (kW)")
-
+    plt.ylim(0, 280)
     ax = plt.gca()
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m %H:%M"))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d-%Y"))
     ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
 
     plt.xticks(rotation=45, ha="right")
