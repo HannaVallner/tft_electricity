@@ -304,9 +304,10 @@ def save_diagnostic_p50_comparison_plot(
     """
     Save a p50 comparison plot for a diagnostic forecast window.
 
-    The seed is selected elsewhere as the representative shared seed.
-    Within that seed, this function selects a window where model behaviour differs
-    clearly, while avoiding windows dominated by a single extreme failure.
+    The seed is selected as the shared seed whose average mean NQL across models
+    is closest to the overall average across seeds. Within that seed, the plotted
+    window is selected to show meaningful target variation and visible differences
+    between model variants.
     """
 
     models = ["baseline", "no_attention", "mlp_features", "no_lstm", "transformer_only"]
@@ -334,51 +335,14 @@ def save_diagnostic_p50_comparison_plot(
     merge_keys = ["id", "forecast_origin", "target_time", "horizon"]
 
     for col in merge_keys:
-        targets_df[col] = pd.to_numeric(targets_df[col], errors="coerce")
-
-    targets_df = targets_df.dropna(subset=merge_keys + ["target"]).copy()
-
-    for col in merge_keys:
         targets_df[col] = targets_df[col].astype(int)
 
     for model_name in models:
         for col in merge_keys:
-            prediction_frames[model_name][col] = pd.to_numeric(
-                prediction_frames[model_name][col],
-                errors="coerce",
-            )
-
-        prediction_frames[model_name]["p50"] = pd.to_numeric(
-            prediction_frames[model_name]["p50"],
-            errors="coerce",
-        )
-
-        before = len(prediction_frames[model_name])
-        prediction_frames[model_name] = prediction_frames[model_name].dropna(
-            subset=merge_keys + ["p50"]
-        ).copy()
-        after = len(prediction_frames[model_name])
-
-        if before != after:
-            print(
-                f"{model_name}: dropped {before - after} rows with missing/non-numeric values"
-            )
-
-        for col in merge_keys:
             prediction_frames[model_name][col] = prediction_frames[model_name][col].astype(int)
 
-    base_merged = prediction_frames[models[0]].merge(
-        targets_df,
-        on=merge_keys,
-        how="inner",
-    )
-
-    if base_merged.empty:
-        print("Skipping diagnostic p50 comparison plot: merged base dataframe is empty")
-        return None
-
-    window_error_frames = []
     merged_frames = {}
+    window_error_frames = []
 
     for model_name in models:
         model_merged = prediction_frames[model_name].merge(
@@ -402,21 +366,17 @@ def save_diagnostic_p50_comparison_plot(
             .reset_index(name=f"{model_name}_mae")
         )
 
-        window_error_frames.append(model_window_errors)
         merged_frames[model_name] = model_merged
+        window_error_frames.append(model_window_errors)
 
     combined_window_errors = window_error_frames[0]
 
-    for err_df in window_error_frames[1:]:
+    for error_df in window_error_frames[1:]:
         combined_window_errors = combined_window_errors.merge(
-            err_df,
+            error_df,
             on=["id", "forecast_origin"],
             how="inner",
         )
-
-    if combined_window_errors.empty:
-        print("Skipping diagnostic p50 comparison plot: no shared windows across models")
-        return None
 
     mae_columns = [
         col for col in combined_window_errors.columns
@@ -424,13 +384,7 @@ def save_diagnostic_p50_comparison_plot(
     ]
 
     combined_window_errors["mean_window_mae"] = (
-        combined_window_errors[mae_columns]
-        .mean(axis=1)
-    )
-
-    combined_window_errors["model_spread"] = (
-        combined_window_errors[mae_columns].max(axis=1)
-        - combined_window_errors[mae_columns].min(axis=1)
+        combined_window_errors[mae_columns].mean(axis=1)
     )
 
     combined_window_errors["robust_model_spread"] = (
@@ -442,82 +396,52 @@ def save_diagnostic_p50_comparison_plot(
         combined_window_errors[mae_columns].max(axis=1)
     )
 
-    # Add target dynamics, so the selected window is not mostly flat/zero.
-    target_window_stats = (
+    base_merged = merged_frames[models[0]]
+
+    target_stats = (
         base_merged
         .groupby(["id", "forecast_origin"])
         .agg(
             target_mean=("target", "mean"),
-            target_std=("target", "std"),
             target_max=("target", "max"),
             target_min=("target", "min"),
         )
         .reset_index()
     )
 
-    target_window_stats["target_range"] = (
-        target_window_stats["target_max"] - target_window_stats["target_min"]
+    target_stats["target_range"] = (
+        target_stats["target_max"] - target_stats["target_min"]
     )
 
     combined_window_errors = combined_window_errors.merge(
-        target_window_stats,
+        target_stats,
         on=["id", "forecast_origin"],
         how="inner",
     )
 
-    # Keep windows with meaningful target movement.
-    target_range_threshold = combined_window_errors["target_range"].quantile(0.70)
-    target_mean_threshold = combined_window_errors["target_mean"].quantile(0.40)
-
-    candidate_windows = combined_window_errors[
-        (combined_window_errors["target_range"] >= target_range_threshold)
-        & (combined_window_errors["target_mean"] >= target_mean_threshold)
+    candidates = combined_window_errors[
+        (combined_window_errors["target_range"] >= combined_window_errors["target_range"].quantile(0.70))
+        & (combined_window_errors["target_mean"] >= combined_window_errors["target_mean"].quantile(0.40))
+        & (combined_window_errors["max_model_mae"] <= combined_window_errors["max_model_mae"].quantile(0.90))
+        & (combined_window_errors["robust_model_spread"] >= combined_window_errors["robust_model_spread"].quantile(0.85))
     ].copy()
 
-    if candidate_windows.empty:
-        print("No diagnostic candidates after target filtering; falling back to all windows")
-        candidate_windows = combined_window_errors.copy()
+    if candidates.empty:
+        print("No diagnostic candidates found; falling back to high robust-spread window.")
+        candidates = combined_window_errors[
+            combined_window_errors["robust_model_spread"]
+            >= combined_window_errors["robust_model_spread"].quantile(0.85)
+        ].copy()
 
-    # Avoid windows where one model explodes and dominates the whole plot.
-    max_mae_threshold = candidate_windows["max_model_mae"].quantile(0.90)
-
-    candidate_windows = candidate_windows[
-        candidate_windows["max_model_mae"] <= max_mae_threshold
-    ].copy()
-
-    if candidate_windows.empty:
-        print("No candidates after max-MAE filtering; falling back to all windows")
-        candidate_windows = combined_window_errors.copy()
-
-    # Choose windows with high robust model difference.
-    robust_spread_threshold = candidate_windows["robust_model_spread"].quantile(0.85)
-
-    candidate_windows = candidate_windows[
-        candidate_windows["robust_model_spread"] >= robust_spread_threshold
-    ].copy()
-
-    if candidate_windows.empty:
-        print("No candidates after robust-spread filtering; falling back to all windows")
-        candidate_windows = combined_window_errors.copy()
-
-    # Among diagnostic windows, choose the one with lowest average error.
     selected_window = (
-        candidate_windows
+        candidates
         .sort_values(["mean_window_mae", "robust_model_spread"], ascending=[True, False])
         .iloc[0]
     )
 
     selected_id = selected_window["id"]
     selected_origin = selected_window["forecast_origin"]
-
-    print("Selected diagnostic p50 comparison window:")
-    print(f"  id={selected_id}")
-    print(f"  forecast_origin={selected_origin}")
-    print(f"  mean_window_mae={selected_window['mean_window_mae']:.4f}")
-    print(f"  model_spread={selected_window['model_spread']:.4f}")
-    print(f"  robust_model_spread={selected_window['robust_model_spread']:.4f}")
-    print(f"  target_range={selected_window['target_range']:.4f}")
-    print(f"  target_mean={selected_window['target_mean']:.4f}")
+    start_date = pd.Timestamp("2011-01-01 00:00:00")
 
     base_window = (
         base_merged[
@@ -528,7 +452,6 @@ def save_diagnostic_p50_comparison_plot(
         .copy()
     )
 
-    start_date = pd.Timestamp("2011-01-01 00:00:00")
     base_window["target_time_dt"] = (
         start_date + pd.to_timedelta(base_window["target_time"], unit="h")
     )
@@ -586,6 +509,7 @@ def save_diagnostic_p50_comparison_plot(
     plt.close()
 
     return plot_path
+
 
 def main(args):
     metrics_dir = Path(args.metrics_dir)
